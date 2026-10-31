@@ -63,7 +63,7 @@ footer{text-align:center;padding:8px 18px 25px;color:var(--muted);font-size:11px
  <button class="secondary" id="exportAll" style="width:100%">Esporta elenco e coordinate (CSV)</button>
 </section>
 </main>
-<footer>FotoArchivio 0.1 · Prototipo di prova · I dati restano in questo browser</footer>
+<footer>FotoArchivio 0.3 · Prototipo di prova · I dati restano in questo browser</footer>
 
 <script>
 const DB_NAME='FotoArchivioDB', DB_VERSION=1;
@@ -99,9 +99,15 @@ $('takePhoto').onclick=()=>$('cameraInput').click();
 $('cameraInput').onchange=e=>{const f=e.target.files[0];if(!f)return;currentBlob=f;if(currentUrl)URL.revokeObjectURL(currentUrl);currentUrl=URL.createObjectURL(f);$('preview').src=currentUrl;$('photoName').value='';$('photoArea').classList.remove('hidden');$('gpsStatus').textContent='Foto acquisita. Al salvataggio chiederemo il permesso per rilevare le coordinate GPS.';$('photoName').focus();};
 $('retake').onclick=()=>{$('cameraInput').value='';$('photoArea').classList.add('hidden');currentBlob=null;};
 $('savePhoto').onclick=async()=>{if(!currentBlob)return;const name=safeName($('photoName').value);$('savePhoto').disabled=true;let lat=null,lon=null,accuracy=null;const status=$('gpsStatus');if(navigator.geolocation){status.textContent='Rilevamento GPS…';try{const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:12000,maximumAge:30000}));lat=pos.coords.latitude;lon=pos.coords.longitude;accuracy=pos.coords.accuracy;}catch(e){status.textContent='GPS non disponibile o permesso negato: salvo comunque la foto.';}}const ext=(currentBlob.type||'image/jpeg').split('/')[1]||'jpg';const rec={name,folder:activeFolder,blob:currentBlob,created:Date.now(),lat,lon,accuracy,mime:currentBlob.type,extension:ext};await new Promise((res,rej)=>{const r=tx('readwrite').add(rec);r.onsuccess=res;r.onerror=()=>rej(r.error);});$('savePhoto').disabled=false;$('photoArea').classList.add('hidden');$('cameraInput').value='';currentBlob=null;await render();};
-function choose(){const menu=folders.map((f,i)=>(i+1)+'. '+f).join('\\n');const n=prompt('Scegli la cartella digitando il numero:\\n'+menu+'\\n\\nAnnulla per non cambiare.');if(n===null)return;const i=Number(n)-1;if(Number.isInteger(i)&&folders[i]){activeFolder=folders[i];localStorage.setItem('fa_active',activeFolder);updateFolder();}}
-$('folderButton').onclick=choose;$('chooseFolder').onclick=choose;
-$('newFolder').onclick=()=>{const n=prompt('Nome della nuova cartella:');if(!n)return;const name=n.trim().slice(0,60);if(!name)return;if(!folders.includes(name))folders.push(name);activeFolder=name;localStorage.setItem('fa_folders',JSON.stringify(folders));localStorage.setItem('fa_active',activeFolder);updateFolder();};
+$('folderSelect').onchange=(e)=>{
+ const selected=e.target.value;
+ if(selected==='__create_folder__'){createFolder();return;}
+ if(folders.includes(selected)){
+  activeFolder=selected;
+  localStorage.setItem('fa_active',activeFolder);
+  updateFolder();
+ }
+};
 $('exportAll').onclick=async()=>{const ps=await allPhotos();const rows=[['nome','cartella','data_ora','latitudine','longitudine','precisione_m']];for(const p of ps)rows.push([p.name,p.folder,new Date(p.created).toISOString(),p.lat??'',p.lon??'',p.accuracy??'']);const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\\r\\n');downloadBlob(new Blob(['\\ufeff'+csv],{type:'text/csv;charset=utf-8'}),'FotoArchivio_indice.csv');};
 (async()=>{try{db=await openDB();folders=JSON.parse(localStorage.getItem('fa_folders')||'["Juvanum"]');activeFolder=localStorage.getItem('fa_active')||folders[0]||'Juvanum';if(!folders.includes(activeFolder))folders.push(activeFolder);updateFolder();if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});}catch(e){alert('Impossibile inizializzare l’archivio locale: '+e.message);}})();
 </script>
