@@ -25,6 +25,21 @@ input,select{font:16px system-ui;width:100%;padding:13px;border:1px solid #bdc8d
 .note{font-size:12px;color:var(--muted);line-height:1.45}.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #e5eaee}
 .thumb{width:62px;height:62px;object-fit:cover;border-radius:9px;background:#e7edf1}.iteminfo{min-width:0;flex:1}.iteminfo strong{display:block;overflow-wrap:anywhere}.iteminfo small{color:var(--muted)}
 .pill{display:inline-block;background:#e7f0f7;color:#17496c;border-radius:99px;padding:4px 9px;font-size:12px}
+/* Schermata di revisione dopo lo scatto */
+#captureScreen{position:fixed;inset:0;z-index:50;background:#101820;color:white;display:flex;flex-direction:column;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom);overflow:auto}
+#captureScreen.hidden{display:none!important}
+.captureTop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 2px}
+.captureTop strong{font-size:16px}
+#preview{width:100%;height:min(54vh,560px);max-height:none;object-fit:contain;background:#05090d;border-radius:12px;flex:0 1 auto}
+.captureControls{display:grid;gap:10px;padding:12px 0 8px}
+.captureControls label{color:#d8e5ef;margin:0}
+.captureControls input{font-size:18px;padding:15px}
+.captureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:9px}
+.captureActions button{min-height:52px}
+.captureBottom{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:auto;padding:8px 0 12px}
+.captureBottom button{font-size:13px;padding:11px}
+.keyHint{font-size:12px;color:#d8e5ef;text-align:center;padding:2px 0}
+@media(min-width:700px){#captureScreen{align-items:center}#captureScreen>*{width:min(100%,680px)}#preview{height:55vh}}
 footer{text-align:center;padding:8px 18px 25px;color:var(--muted);font-size:11px}
 </style>
 </head>
@@ -41,13 +56,7 @@ footer{text-align:center;padding:8px 18px 25px;color:var(--muted);font-size:11px
  <div class="label">NUOVA FOTOGRAFIA</div>
  <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden">
  <button class="primary" id="takePhoto">📸 SCATTA FOTOGRAFIA</button>
- <div id="photoArea" class="hidden" style="margin-top:14px;display:grid;gap:10px">
-  <img id="preview" alt="Anteprima fotografia">
-  <label class="label" for="photoName">NOME DELLA FOTOGRAFIA</label>
-  <input id="photoName" placeholder="Es. Basilica - lato nord" maxlength="100">
-  <div class="row"><button class="secondary" id="retake">Rifai</button><button class="primary" id="savePhoto">Salva fotografia</button></div>
-  <div class="note" id="gpsStatus">Rilevamento posizione disponibile al salvataggio, con il tuo consenso.</div>
- </div>
+
 </section>
 
 <section class="card">
@@ -63,7 +72,25 @@ footer{text-align:center;padding:8px 18px 25px;color:var(--muted);font-size:11px
  <button class="secondary" id="exportAll" style="width:100%">Esporta elenco e coordinate (CSV)</button>
 </section>
 </main>
-<footer>FotoArchivio 0.3 · Prototipo di prova · I dati restano in questo browser</footer>
+<section id="captureScreen" class="hidden" aria-label="Anteprima e salvataggio fotografia">
+ <div class="captureTop"><strong>📷 Controlla la fotografia</strong><span class="pill" id="captureFolder">Juvanum</span></div>
+ <img id="preview" alt="Anteprima fotografia appena scattata">
+ <div class="captureControls">
+  <label for="photoName">NOME DELLA FOTOGRAFIA</label>
+  <input id="photoName" placeholder="Scrivi un nome oppure usa quello proposto" maxlength="100" autocomplete="off">
+  <div class="captureActions">
+   <button class="secondary" id="retake">↻ Rifai</button>
+   <button class="primary" id="savePhoto">✓ Conferma e scatta prossima</button>
+  </div>
+  <div class="note" id="gpsStatus" style="color:#d8e5ef">Il GPS viene rilevato al salvataggio, se autorizzato.</div>
+  <div class="keyHint" id="keyHint">Tasti volume (se supportati): VOL+ conferma · VOL− rifai</div>
+ </div>
+ <div class="captureBottom">
+  <span class="note" style="color:#d8e5ef">La cartella resta quella attiva.</span>
+  <button class="secondary" id="changeFolder">📁 Cambia cartella</button>
+ </div>
+</section>
+<footer>FotoArchivio 0.4 · Prototipo di prova · I dati restano in questo browser</footer>
 
 <script>
 const DB_NAME='FotoArchivioDB', DB_VERSION=1;
@@ -73,42 +100,64 @@ function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(D
 function tx(mode='readonly'){return db.transaction('photos',mode).objectStore('photos');}
 function allPhotos(){return new Promise((res,rej)=>{const r=tx().getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
 function safeName(s){return (s||'Fotografia').trim().replace(/[\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').slice(0,100)||'Fotografia';}
-function populateFolderSelect(){
- const select=$('folderSelect');
- select.innerHTML='';
- folders.forEach(name=>{const option=document.createElement('option');option.value=name;option.textContent='📁 '+name;select.append(option);});
- const create=document.createElement('option');create.value='__create_folder__';create.textContent='＋ Nuova cartella…';select.append(create);
- select.value=activeFolder;
-}
+function folderSlug(s){return safeName(s).replace(/[^a-zA-Z0-9À-ÿ_-]+/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'')||'Foto';}
+function counterKey(folder){return 'fa_counter_'+folder;}
+function nextCounter(folder){return Math.max(1,parseInt(localStorage.getItem(counterKey(folder))||'1',10)||1);}
+function suggestedName(folder){return folderSlug(folder)+'_'+String(nextCounter(folder)).padStart(3,'0');}
+function populateFolderSelect(){const select=$('folderSelect');select.innerHTML='';folders.forEach(name=>{const option=document.createElement('option');option.value=name;option.textContent='📁 '+name;select.append(option);});const create=document.createElement('option');create.value='__create_folder__';create.textContent='＋ Nuova cartella…';select.append(create);select.value=activeFolder;}
 function updateFolder(){populateFolderSelect();$('activePill').textContent=activeFolder;render();}
-function createFolder(){
- const previous=activeFolder;
- const entered=prompt('Nome della nuova cartella:');
- if(entered===null||!entered.trim()){ $('folderSelect').value=previous; return; }
- const name=entered.trim().slice(0,60);
- if(!name){ $('folderSelect').value=previous; return; }
- if(!folders.includes(name))folders.push(name);
- activeFolder=name;
- localStorage.setItem('fa_folders',JSON.stringify(folders));
- localStorage.setItem('fa_active',activeFolder);
- updateFolder();
-}
-async function render(){const photos=(await allPhotos()).filter(p=>p.folder===activeFolder).sort((a,b)=>b.created-a.created);$('count').textContent=photos.length+' fotografie';const list=$('photoList');list.innerHTML='';if(!photos.length){list.innerHTML='<p class="note">Nessuna fotografia in questa cartella.</p>';return;}for(const p of photos){const url=URL.createObjectURL(p.blob);const el=document.createElement('div');el.className='item';const img=document.createElement('img');img.className='thumb';img.src=url;const info=document.createElement('div');info.className='iteminfo';const strong=document.createElement('strong');strong.textContent=p.name;const small=document.createElement('small');small.textContent=new Date(p.created).toLocaleString('it-IT')+(p.lat!=null?' · GPS presente':' · GPS non disponibile');info.append(strong,small);const dl=document.createElement('button');dl.className='secondary';dl.textContent='↓';dl.title='Scarica foto';dl.onclick=()=>downloadBlob(p.blob,p.name+'.jpg');el.append(img,info,dl);list.append(el);}}
+function createFolder(){const previous=activeFolder;const entered=prompt('Nome della nuova cartella:');if(entered===null||!entered.trim()){$('folderSelect').value=previous;return;}const name=entered.trim().slice(0,60);if(!name){$('folderSelect').value=previous;return;}if(!folders.includes(name))folders.push(name);activeFolder=name;localStorage.setItem('fa_folders',JSON.stringify(folders));localStorage.setItem('fa_active',activeFolder);updateFolder();}
+async function render(){const photos=(await allPhotos()).filter(p=>p.folder===activeFolder).sort((a,b)=>b.created-a.created);$('count').textContent=photos.length+' fotografie';const list=$('photoList');list.innerHTML='';if(!photos.length){list.innerHTML='<p class="note">Nessuna fotografia in questa cartella.</p>';return;}for(const p of photos){const url=URL.createObjectURL(p.blob);const el=document.createElement('div');el.className='item';const img=document.createElement('img');img.className='thumb';img.src=url;const info=document.createElement('div');info.className='iteminfo';const strong=document.createElement('strong');strong.textContent=p.name;const small=document.createElement('small');small.textContent=new Date(p.created).toLocaleString('it-IT')+(p.lat!=null?' · GPS presente':' · GPS non disponibile');info.append(strong,small);const dl=document.createElement('button');dl.className='secondary';dl.textContent='↓';dl.title='Scarica foto';dl.onclick=()=>downloadBlob(p.blob,p.name+'.'+(p.extension||'jpg'));el.append(img,info,dl);list.append(el);}}
 function downloadBlob(blob,name){const a=document.createElement('a');const u=URL.createObjectURL(blob);a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}
-$('takePhoto').onclick=()=>$('cameraInput').click();
-$('cameraInput').onchange=e=>{const f=e.target.files[0];if(!f)return;currentBlob=f;if(currentUrl)URL.revokeObjectURL(currentUrl);currentUrl=URL.createObjectURL(f);$('preview').src=currentUrl;$('photoName').value='';$('photoArea').classList.remove('hidden');$('gpsStatus').textContent='Foto acquisita. Al salvataggio chiederemo il permesso per rilevare le coordinate GPS.';$('photoName').focus();};
-$('retake').onclick=()=>{$('cameraInput').value='';$('photoArea').classList.add('hidden');currentBlob=null;};
-$('savePhoto').onclick=async()=>{if(!currentBlob)return;const name=safeName($('photoName').value);$('savePhoto').disabled=true;let lat=null,lon=null,accuracy=null;const status=$('gpsStatus');if(navigator.geolocation){status.textContent='Rilevamento GPS…';try{const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:12000,maximumAge:30000}));lat=pos.coords.latitude;lon=pos.coords.longitude;accuracy=pos.coords.accuracy;}catch(e){status.textContent='GPS non disponibile o permesso negato: salvo comunque la foto.';}}const ext=(currentBlob.type||'image/jpeg').split('/')[1]||'jpg';const rec={name,folder:activeFolder,blob:currentBlob,created:Date.now(),lat,lon,accuracy,mime:currentBlob.type,extension:ext};await new Promise((res,rej)=>{const r=tx('readwrite').add(rec);r.onsuccess=res;r.onerror=()=>rej(r.error);});$('savePhoto').disabled=false;$('photoArea').classList.add('hidden');$('cameraInput').value='';currentBlob=null;await render();};
-$('folderSelect').onchange=(e)=>{
- const selected=e.target.value;
- if(selected==='__create_folder__'){createFolder();return;}
- if(folders.includes(selected)){
-  activeFolder=selected;
-  localStorage.setItem('fa_active',activeFolder);
-  updateFolder();
- }
+function openCamera(){ $('cameraInput').click(); }
+function showCapture(file){currentBlob=file;if(currentUrl)URL.revokeObjectURL(currentUrl);currentUrl=URL.createObjectURL(file);$('preview').src=currentUrl;$('captureFolder').textContent=activeFolder;const suggestion=suggestedName(activeFolder);$('photoName').value=suggestion;$('gpsStatus').textContent='Nome automatico suggerito: puoi modificarlo liberamente. Il GPS è facoltativo.';$('captureScreen').classList.remove('hidden');setTimeout(()=>$('photoName').focus(),120);}
+$('takePhoto').onclick=()=>openCamera();
+$('cameraInput').onchange=e=>{const f=e.target.files&&e.target.files[0];if(!f)return;showCapture(f);};
+$('retake').onclick=()=>{ // Il click avviene direttamente dal tocco: Android può riaprire la fotocamera.
+ openCamera(); };
+// Tentativo di gestione dei tasti fisici volume durante l'anteprima.
+// Chrome/Android può intercettarli prima della pagina: in quel caso restano attivi i pulsanti sullo schermo.
+function isCaptureVisible(){return !$('captureScreen').classList.contains('hidden');}
+let physicalKeyBusy=false;
+document.addEventListener('keydown',e=>{
+ if(!isCaptureVisible() || physicalKeyBusy) return;
+ const key=(e.key||'').toLowerCase();
+ const code=e.keyCode||e.which;
+ const isUp=key==='audiovolumeup'||key==='volumeup'||code===175;
+ const isDown=key==='audiovolumedown'||key==='volumedown'||code===174;
+ if(!isUp&&!isDown) return;
+ e.preventDefault();e.stopPropagation();
+ physicalKeyBusy=true;
+ if(isUp){$('savePhoto').click();}else{$('retake').click();}
+ setTimeout(()=>{physicalKeyBusy=false;},700);
+},true);
+$('changeFolder').onclick=()=>{$('captureScreen').classList.add('hidden');currentBlob=null;$('cameraInput').value='';if(currentUrl){URL.revokeObjectURL(currentUrl);currentUrl=null;}window.scrollTo({top:0,behavior:'smooth'});$('folderSelect').focus();};
+function getPositionOptional(){return new Promise(resolve=>{if(!navigator.geolocation){resolve({lat:null,lon:null,accuracy:null});return;}navigator.geolocation.getCurrentPosition(pos=>resolve({lat:pos.coords.latitude,lon:pos.coords.longitude,accuracy:pos.coords.accuracy}),()=>resolve({lat:null,lon:null,accuracy:null}),{enableHighAccuracy:true,timeout:4500,maximumAge:60000});});}
+async function uniqueName(base,folder){const ps=(await allPhotos()).filter(p=>p.folder===folder);const used=new Set(ps.map(p=>p.name.toLocaleLowerCase()));if(!used.has(base.toLocaleLowerCase()))return base;let n=2;while(used.has((base+'_'+n).toLocaleLowerCase()))n++;return base+'_'+n;}
+$('savePhoto').onclick=()=>{
+ if(!currentBlob)return;
+ const blobToSave=currentBlob, folderToSave=activeFolder;
+ const suggested=suggestedName(folderToSave), typed=safeName($('photoName').value);
+ const usedAutomatic=(typed===suggested);
+ // Apriamo subito il selettore fotocamera, mentre il tocco dell'utente è ancora attivo.
+ // Il salvataggio della foto precedente prosegue in parallelo.
+ $('captureScreen').classList.add('hidden');
+ currentBlob=null;
+ openCamera();
+ (async()=>{
+  $('savePhoto').disabled=true;
+  const gps=await getPositionOptional();
+  const ext=(blobToSave.type||'image/jpeg').split('/')[1]||'jpg';
+  const unique=await uniqueName(typed,folderToSave);
+  const rec={name:unique,folder:folderToSave,blob:blobToSave,created:Date.now(),lat:gps.lat,lon:gps.lon,accuracy:gps.accuracy,mime:blobToSave.type,extension:ext};
+  await new Promise((res,rej)=>{const r=tx('readwrite').add(rec);r.onsuccess=res;r.onerror=()=>rej(r.error);});
+  if(usedAutomatic){localStorage.setItem(counterKey(folderToSave),String(nextCounter(folderToSave)+1));}
+  $('savePhoto').disabled=false;
+  await render();
+ })().catch(err=>{alert('Non sono riuscito a salvare la fotografia: '+err.message);$('captureScreen').classList.remove('hidden');$('photoName').value=typed;$('savePhoto').disabled=false;});
 };
+$('folderSelect').onchange=e=>{const selected=e.target.value;if(selected==='__create_folder__'){createFolder();return;}if(folders.includes(selected)){activeFolder=selected;localStorage.setItem('fa_active',activeFolder);updateFolder();}};
 $('exportAll').onclick=async()=>{const ps=await allPhotos();const rows=[['nome','cartella','data_ora','latitudine','longitudine','precisione_m']];for(const p of ps)rows.push([p.name,p.folder,new Date(p.created).toISOString(),p.lat??'',p.lon??'',p.accuracy??'']);const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\\r\\n');downloadBlob(new Blob(['\\ufeff'+csv],{type:'text/csv;charset=utf-8'}),'FotoArchivio_indice.csv');};
-(async()=>{try{db=await openDB();folders=JSON.parse(localStorage.getItem('fa_folders')||'["Juvanum"]');activeFolder=localStorage.getItem('fa_active')||folders[0]||'Juvanum';if(!folders.includes(activeFolder))folders.push(activeFolder);updateFolder();if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});}catch(e){alert('Impossibile inizializzare l’archivio locale: '+e.message);}})();
+(async()=>{try{db=await openDB();folders=JSON.parse(localStorage.getItem('fa_folders')||'["Juvanum"]');activeFolder=localStorage.getItem('fa_active')||folders[0]||'Juvanum';if(!folders.includes(activeFolder))folders.push(activeFolder);const existing=await allPhotos();for(const folder of folders){if(localStorage.getItem(counterKey(folder))===null){const prefix=folderSlug(folder)+'_';let max=0;for(const photo of existing){if(photo.folder===folder&&photo.name.startsWith(prefix)){const n=Number(photo.name.slice(prefix.length));if(Number.isInteger(n)&&n>max)max=n;}}localStorage.setItem(counterKey(folder),String(max+1));}}updateFolder();if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});}catch(e){alert('Impossibile inizializzare l’archivio locale: '+e.message);}})();
 </script>
 </body></html>
