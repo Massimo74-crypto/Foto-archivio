@@ -48,7 +48,7 @@ import java.util.Locale;
 import java.util.concurrent.Executor;
 
 public class MainActivity extends AppCompatActivity {
-    private final Executor mainExecutor = ContextCompat.getMainExecutor(this);
+    private Executor mainExecutor;
     private SharedPreferences prefs;
     private String folder = "Juvanum";
     private PreviewView previewView;
@@ -66,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        mainExecutor = ContextCompat.getMainExecutor(this);
         prefs = getSharedPreferences("fotoarchivio", MODE_PRIVATE);
         folder = prefs.getString("active_folder", "Juvanum");
         showCameraScreen();
