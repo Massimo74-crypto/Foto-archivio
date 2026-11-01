@@ -86,8 +86,6 @@ public class MainActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<String[]> permissionLauncher =
         registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
-            if (Boolean.TRUE.equals(result.get(Manifest.permission.CAMERA))) startCamera();
-            else showMessage("Per usare FotoArchivio serve il permesso Fotocamera.");
             if (Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_FINE_LOCATION)) ||
                 Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_COARSE_LOCATION))) updateLocation();
         });
@@ -122,11 +120,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void requestPermissionsIfNeeded() {
-        boolean camera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
         boolean location = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        if (!camera) permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION});
-        else { startCamera(); if (location) updateLocation(); }
+        if (!location) permissionLauncher.launch(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION});
+        else updateLocation();
     }
 
     private void showCameraScreen() {
@@ -243,7 +240,7 @@ public class MainActivity extends AppCompatActivity {
         page.addView(gps);
         LinearLayout actions = new LinearLayout(this);
         Button retake = button("RIFAI");
-        retake.setOnClickListener(v -> { if (pendingPhoto != null) pendingPhoto.delete(); showCameraScreen(); startCamera(); });
+        retake.setOnClickListener(v -> { if (pendingPhoto != null) pendingPhoto.delete(); showCameraScreen(); });
         Button save = button("CONFERMA E SALVA");
         save.setOnClickListener(v -> savePhoto(filename.getText().toString()));
         actions.addView(retake, new LinearLayout.LayoutParams(0, dp(58), 1));
