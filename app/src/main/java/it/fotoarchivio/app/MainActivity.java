@@ -3,6 +3,7 @@ package it.fotoarchivio.app;
 import android.Manifest;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.BitmapFactory;
@@ -54,8 +55,35 @@ public class MainActivity extends AppCompatActivity {
     private PreviewView previewView;
     private ImageCapture imageCapture;
     private File pendingPhoto;
+    private Uri cameraOutputUri;
     private Location lastLocation;
     private FrameLayout root;
+    private final ActivityResultLauncher<Intent> cameraLauncher =
+        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && cameraOutputUri != null) {
+                try {
+                    pendingPhoto = File.createTempFile("fotoarchivio_", ".jpg", getCacheDir());
+                    try (InputStream in = getContentResolver().openInputStream(cameraOutputUri);
+                         OutputStream out = new java.io.FileOutputStream(pendingPhoto)) {
+                        byte[] buffer = new byte[8192]; int count;
+                        while ((count = in.read(buffer)) > 0) out.write(buffer, 0, count);
+                    }
+                    getContentResolver().delete(cameraOutputUri, null, null);
+                    cameraOutputUri = null;
+                    updateLocation();
+                    showReviewScreen();
+                } catch (Exception e) {
+                    if (cameraOutputUri != null) getContentResolver().delete(cameraOutputUri, null, null);
+                    cameraOutputUri = null;
+                    showMessage("Non riesco a recuperare la foto dalla fotocamera: " + e.getMessage());
+                }
+            } else {
+                if (cameraOutputUri != null) getContentResolver().delete(cameraOutputUri, null, null);
+                cameraOutputUri = null;
+                showCameraScreen();
+            }
+        });
+
     private final ActivityResultLauncher<String[]> permissionLauncher =
         registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
             if (Boolean.TRUE.equals(result.get(Manifest.permission.CAMERA))) startCamera();
@@ -109,15 +137,14 @@ public class MainActivity extends AppCompatActivity {
         Button folderButton = button("Cartella: " + folder + "   ·   Cambia cartella");
         folderButton.setOnClickListener(v -> chooseFolder());
         page.addView(folderButton, new LinearLayout.LayoutParams(-1, dp(52)));
-        previewView = new PreviewView(this);
-        previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
-        LinearLayout.LayoutParams cameraParams = new LinearLayout.LayoutParams(-1, 0, 1);
-        cameraParams.setMargins(0, dp(8), 0, dp(8));
-        page.addView(previewView, cameraParams);
-        Button capture = button("SCATTA FOTO");
-        capture.setTextSize(19);
-        capture.setOnClickListener(v -> takePhoto());
-        page.addView(capture, new LinearLayout.LayoutParams(-1, dp(64)));
+        TextView info = text("Usa la fotocamera del Motorola con le sue modalità: foto, panorama, notturna, messa a fuoco e altre impostazioni disponibili.", 16);
+        info.setGravity(Gravity.CENTER);
+        info.setPadding(dp(12), dp(24), dp(12), dp(24));
+        page.addView(info, new LinearLayout.LayoutParams(-1, 0, 1));
+        Button capture = button("APRI FOTOCAMERA MOTOROLA");
+        capture.setTextSize(18);
+        capture.setOnClickListener(v -> openNativeCamera());
+        page.addView(capture, new LinearLayout.LayoutParams(-1, dp(68)));
         root.addView(page);
         setContentView(root);
     }
@@ -142,6 +169,26 @@ public class MainActivity extends AppCompatActivity {
     private String cleanFolder(String s) {
         String out = s.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
         return out.isEmpty() ? "Juvanum" : out;
+    }
+
+    private void openNativeCamera() {
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, "FotoArchivio_temp_" + System.currentTimeMillis() + ".jpg");
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FotoArchivioTemp/");
+            values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            cameraOutputUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (cameraOutputUri == null) throw new Exception("Impossibile preparare il file temporaneo");
+            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraOutputUri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            cameraLauncher.launch(intent);
+        } catch (Exception e) {
+            if (cameraOutputUri != null) getContentResolver().delete(cameraOutputUri, null, null);
+            cameraOutputUri = null;
+            showMessage("Fotocamera Motorola non disponibile: " + e.getMessage());
+        }
     }
 
     private void startCamera() {
