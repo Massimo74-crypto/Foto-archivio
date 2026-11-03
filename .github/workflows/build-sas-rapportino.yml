@@ -44,6 +44,13 @@ jobs:
           test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
           test -f "$PROJECT_DIR/app/src/main/assets/index.html"
 
+      - name: Inspect technician setup
+        run: |
+          echo '--- MainActivity.java ---'
+          sed -n '1,260p' "$ANDROID_PROJECT_DIR/app/src/main/java/it/sas/rapportino/MainActivity.java"
+          echo '--- Technician-related HTML/JS ---'
+          grep -inE 'tecnico|tecnic|operatore|nome.*utente|localStorage|pdf' "$ANDROID_PROJECT_DIR/app/src/main/assets/index.html" | head -160
+
       - name: Build debug APK
         run: gradle --no-daemon -p "$ANDROID_PROJECT_DIR" assembleDebug
 
