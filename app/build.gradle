@@ -7,11 +7,13 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'it.fotoarchivio.app'
+        // Package separato: consente di installare questa versione di prova
+        // accanto alla vecchia app senza sovrascriverla.
+        applicationId 'it.fotoarchivio.app.test'
         minSdk 29
         targetSdk 35
         versionCode 1
-        versionName '1.0'
+        versionName '1.0-test'
     }
 
     compileOptions {
