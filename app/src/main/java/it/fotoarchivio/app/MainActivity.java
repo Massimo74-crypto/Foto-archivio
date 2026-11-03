@@ -36,6 +36,7 @@ import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.exifinterface.media.ExifInterface;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -56,29 +57,28 @@ public class MainActivity extends AppCompatActivity {
     private ImageCapture imageCapture;
     private File pendingPhoto;
     private Uri cameraOutputUri;
+    private File cameraTempFile;
     private Location lastLocation;
     private FrameLayout root;
     private final ActivityResultLauncher<Intent> cameraLauncher =
         registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-            if (result.getResultCode() == RESULT_OK && cameraOutputUri != null) {
-                try {
-                    pendingPhoto = File.createTempFile("fotoarchivio_", ".jpg", getCacheDir());
-                    try (InputStream in = getContentResolver().openInputStream(cameraOutputUri);
-                         OutputStream out = new java.io.FileOutputStream(pendingPhoto)) {
-                        byte[] buffer = new byte[8192]; int count;
-                        while ((count = in.read(buffer)) > 0) out.write(buffer, 0, count);
-                    }
-                    getContentResolver().delete(cameraOutputUri, null, null);
+            if (result.getResultCode() == RESULT_OK && cameraTempFile != null) {
+                if (cameraTempFile.exists() && cameraTempFile.length() > 0) {
+                    pendingPhoto = cameraTempFile;
+                    cameraTempFile = null;
                     cameraOutputUri = null;
                     updateLocation();
                     showReviewScreen();
-                } catch (Exception e) {
-                    if (cameraOutputUri != null) getContentResolver().delete(cameraOutputUri, null, null);
+                } else {
+                    if (cameraTempFile != null) cameraTempFile.delete();
+                    cameraTempFile = null;
                     cameraOutputUri = null;
-                    showMessage("Non riesco a recuperare la foto dalla fotocamera: " + e.getMessage());
+                    showMessage("La fotocamera ha terminato lo scatto ma non ha scritto il file. Riprova.");
+                    showCameraScreen();
                 }
             } else {
-                if (cameraOutputUri != null) getContentResolver().delete(cameraOutputUri, null, null);
+                if (cameraTempFile != null) cameraTempFile.delete();
+                cameraTempFile = null;
                 cameraOutputUri = null;
                 showCameraScreen();
             }
@@ -170,19 +170,16 @@ public class MainActivity extends AppCompatActivity {
 
     private void openNativeCamera() {
         try {
-            ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, "FotoArchivio_temp_" + System.currentTimeMillis() + ".jpg");
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-            values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FotoArchivioTemp/");
-            values.put(MediaStore.Images.Media.IS_PENDING, 1);
-            cameraOutputUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-            if (cameraOutputUri == null) throw new Exception("Impossibile preparare il file temporaneo");
+            cameraTempFile = File.createTempFile("fotoarchivio_camera_", ".jpg", getCacheDir());
+            cameraOutputUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", cameraTempFile);
             Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
             intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraOutputUri);
+            intent.setClipData(android.content.ClipData.newRawUri("FotoArchivio output", cameraOutputUri));
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             cameraLauncher.launch(intent);
         } catch (Exception e) {
-            if (cameraOutputUri != null) getContentResolver().delete(cameraOutputUri, null, null);
+            if (cameraTempFile != null) cameraTempFile.delete();
+            cameraTempFile = null;
             cameraOutputUri = null;
             showMessage("Fotocamera Motorola non disponibile: " + e.getMessage());
         }
