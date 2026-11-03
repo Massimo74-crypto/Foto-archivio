@@ -32,19 +32,25 @@ jobs:
         run: |
           mkdir -p sas-project
           unzip -q SAS-Rapportino-Android/SAS_Rapportino_Android.zip -d sas-project
-          test -f sas-project/settings.gradle
-          test -f sas-project/app/build.gradle
-          test -f sas-project/app/src/main/AndroidManifest.xml
-          test -f sas-project/app/src/main/assets/index.html
+          SETTINGS_FILE="$(find sas-project -type f -name settings.gradle -print -quit)"
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "settings.gradle non trovato nell'archivio"
+            find sas-project -maxdepth 4 -type f | head -80
+            exit 1
+          fi
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          echo "ANDROID_PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          test -f "$PROJECT_DIR/app/build.gradle"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          test -f "$PROJECT_DIR/app/src/main/assets/index.html"
 
       - name: Build debug APK
-        working-directory: sas-project
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon -p "$ANDROID_PROJECT_DIR" assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SAS-Rapportino-debug
-          path: sas-project/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.ANDROID_PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
