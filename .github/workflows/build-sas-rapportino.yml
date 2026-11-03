@@ -1,0 +1,50 @@
+name: Build SAS Rapportino APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'SAS-Rapportino-Android/SAS_Rapportino_Android.zip'
+      - '.github/workflows/build-sas-rapportino.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2.1'
+
+      - name: Extract Android project
+        run: |
+          mkdir -p sas-project
+          unzip -q SAS-Rapportino-Android/SAS_Rapportino_Android.zip -d sas-project
+          test -f sas-project/settings.gradle
+          test -f sas-project/app/build.gradle
+          test -f sas-project/app/src/main/AndroidManifest.xml
+          test -f sas-project/app/src/main/assets/index.html
+
+      - name: Build debug APK
+        working-directory: sas-project
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAS-Rapportino-debug
+          path: sas-project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
