@@ -145,7 +145,7 @@ class MainActivity : ComponentActivity() {
         }
         val name = EditText(this).apply {
             hint = "Nome della foto"
-            singleLine = true
+            isSingleLine = true
             textSize = 18f
         }
         val categorySpinner = Spinner(this)
