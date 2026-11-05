@@ -17,12 +17,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install original vintage watermark image
+      - name: Install original vintage images
         run: |
           mkdir -p FA-Android/app/src/main/res/drawable-nodpi
-          curl -L --fail --silent --show-error \\
-            "https://raw.githubusercontent.com/Massimo74-crypto/Foto-archivio/main/file_00000000c53882108ed52dd93d0cc7bb.png" \\
-            -o FA-Android/app/src/main/res/drawable-nodpi/fa_vintage_watermark_image.png
+          curl -L --fail --silent --show-error "https://raw.githubusercontent.com/Massimo74-crypto/Foto-archivio/main/file_00000000c53882108ed52dd93d0cc7bb.png" -o FA-Android/app/src/main/res/drawable-nodpi/fa_vintage_watermark_image.png
+          curl -L --fail --silent --show-error "https://raw.githubusercontent.com/Massimo74-crypto/Foto-archivio/main/file_00000000e4f48210a4714c7586aa9c2f.png" -o FA-Android/app/src/main/res/drawable-nodpi/fa_launcher_icon_image.png
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
