@@ -217,33 +217,77 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showReviewScreen() {
-        LinearLayout page = column();
-        TextView title = text("Controlla la fotografia", 22);
-        page.addView(title);
+        // Mantiene visibile la schermata principale e apre la revisione come
+        // pannello in sovrimpressione, senza una schermata intermedia.
+        if (root == null) showCameraScreen();
+
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(0x99000000);
+        overlay.setClickable(true);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        card.setBackgroundColor(0xffffffff);
+
+        TextView title = text("ANTEPRIMA FOTOGRAFIA", 19);
+        title.setGravity(Gravity.CENTER);
+        title.setTextColor(0xff17324d);
+        card.addView(title, new LinearLayout.LayoutParams(-1, dp(42)));
+
         ImageView image = new ImageView(this);
-        image.setImageBitmap(BitmapFactory.decodeFile(pendingPhoto.getAbsolutePath()));
+        if (pendingPhoto != null && pendingPhoto.exists()) {
+            image.setImageBitmap(BitmapFactory.decodeFile(pendingPhoto.getAbsolutePath()));
+        }
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(-1, 0, 1);
-        imageParams.setMargins(0, dp(8), 0, dp(8));
-        page.addView(image, imageParams);
+        image.setAdjustViewBounds(true);
+        LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        imageParams.setMargins(0, dp(6), 0, dp(8));
+        card.addView(image, imageParams);
+
         EditText filename = new EditText(this);
         filename.setSingleLine(true);
         filename.setText(nextAutomaticName());
         filename.setSelectAllOnFocus(true);
         filename.setHint("Nome fotografia");
-        page.addView(filename, new LinearLayout.LayoutParams(-1, dp(56)));
-        TextView gps = text(lastLocation == null ? "Posizione GPS non disponibile (la foto verrà salvata lo stesso)." :
-            String.format(Locale.ITALY, "GPS: %.6f, %.6f", lastLocation.getLatitude(), lastLocation.getLongitude()), 13);
-        page.addView(gps);
+        card.addView(filename, new LinearLayout.LayoutParams(-1, dp(54)));
+
+        TextView gps = text(lastLocation == null
+            ? "GPS non disponibile"
+            : String.format(Locale.ITALY, "GPS: %.6f, %.6f", lastLocation.getLatitude(), lastLocation.getLongitude()), 12);
+        gps.setGravity(Gravity.CENTER);
+        card.addView(gps, new LinearLayout.LayoutParams(-1, dp(28)));
+
         LinearLayout actions = new LinearLayout(this);
-        Button retake = button("RIFAI");
-        retake.setOnClickListener(v -> { if (pendingPhoto != null) pendingPhoto.delete(); showCameraScreen(); });
-        Button save = button("CONFERMA E SALVA");
-        save.setOnClickListener(v -> savePhoto(filename.getText().toString()));
-        actions.addView(retake, new LinearLayout.LayoutParams(0, dp(58), 1));
-        actions.addView(save, new LinearLayout.LayoutParams(0, dp(58), 1));
-        page.addView(actions);
-        setContentView(page);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button discard = button("CESTINO");
+        discard.setOnClickListener(v -> {
+            if (pendingPhoto != null) pendingPhoto.delete();
+            pendingPhoto = null;
+            ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE))
+                .hideSoftInputFromWindow(filename.getWindowToken(), 0);
+            showCameraScreen();
+        });
+
+        Button confirm = button("CONFERMA");
+        confirm.setOnClickListener(v -> {
+            ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE))
+                .hideSoftInputFromWindow(filename.getWindowToken(), 0);
+            savePhoto(filename.getText().toString());
+        });
+
+        actions.addView(discard, new LinearLayout.LayoutParams(0, dp(54), 1f));
+        actions.addView(confirm, new LinearLayout.LayoutParams(0, dp(54), 1f));
+        card.addView(actions);
+
+        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
+            -1, dp(620), Gravity.CENTER);
+        cardParams.setMargins(dp(18), dp(24), dp(18), dp(24));
+        overlay.addView(card, cardParams);
+        root.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(root);
+
         filename.requestFocus();
         filename.post(() -> {
             filename.setSelection(filename.getText().length());
