@@ -59,12 +59,12 @@ class MainActivity : ComponentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(28), dp(22), dp(22))
-            val watermark = getDrawable(R.drawable.fa_vintage_watermark_image)?.mutate()?.apply { alpha = 18 }
+            val watermark = getDrawable(R.drawable.fa_vintage_watermark_image)?.mutate()?.apply { alpha = 95 }
             val layers = LayerDrawable(arrayOf(ColorDrawable(0xFFF2E7D3.toInt()), watermark!!))
-            layers.setLayerGravity(1, Gravity.CENTER)
-            layers.setLayerInset(1, 0, dp(40), 0, 0)
-            layers.setLayerWidth(1, dp(260))
-            layers.setLayerHeight(1, dp(260))
+            layers.setLayerGravity(1, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+            layers.setLayerInset(1, 0, dp(190), 0, 0)
+            layers.setLayerWidth(1, dp(265))
+            layers.setLayerHeight(1, dp(265))
             background = layers
         }
         root.addView(TextView(this).apply {
