@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
+import android.content.Intent
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -89,6 +90,8 @@ class MainActivity : ComponentActivity() {
         root.addView(actionButton("LAVORO") { activeCategory = "LAVORO"; launchCamera() },
             LinearLayout.LayoutParams(-1, dp(58)).apply { bottomMargin = dp(26) })
         root.addView(actionButton("GESTIONE FOTO E CARTELLE") { showFileManager() },
+            LinearLayout.LayoutParams(-1, dp(52)))
+        root.addView(actionButton("ESPORTA SU PC / ZIP") { showExportOptions() },
             LinearLayout.LayoutParams(-1, dp(52)))
         root.addView(TextView(this).apply {
             text = "Le immagini vengono archiviate in Pictures/FA sul telefono."
@@ -444,6 +447,48 @@ class MainActivity : ComponentActivity() {
                         showFileManager()
                     }.show()
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun showExportOptions() {
+        AlertDialog.Builder(this).setTitle("Esporta archivio")
+            .setItems(arrayOf("Tutto l'archivio in ZIP", "Solo PERSONALE in ZIP", "Solo LAVORO in ZIP", "Istruzioni collegamento USB")) { _, which ->
+                val all = listPhotos()
+                when (which) {
+                    0 -> exportZip(all, "FA-Archivio")
+                    1 -> exportZip(all.filter { it.path.startsWith("Pictures/FA/PERSONALE/") }, "FA-PERSONALE")
+                    2 -> exportZip(all.filter { it.path.startsWith("Pictures/FA/LAVORO/") }, "FA-LAVORO")
+                    3 -> AlertDialog.Builder(this).setTitle("Trasferimento USB al PC")
+                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa → Pictures → FA e copia le cartelle PERSONALE e LAVORO.")
+                        .setPositiveButton("OK", null).show()
+                }
+            }.show()
+    }
+
+    private fun exportZip(items: List<PhotoItem>, baseName: String) {
+        if (items.isEmpty()) { toast("Non ci sono foto da esportare"); return }
+        try {
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "${baseName}_$stamp.zip")
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/FA-Export/")
+            }
+            val zipUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (zipUri == null) { toast("Non riesco a creare il file ZIP"); return }
+            val entries = items.map { photo ->
+                Triple(photo.uri, photo.path.substringAfter("Pictures/FA/").trimEnd('/'), photo.name)
+            }
+            FaZipExporter.write(contentResolver, zipUri, entries)
+            val share = Intent(Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(Intent.EXTRA_STREAM, zipUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(share, "Esporta archivio ZIP"))
+            toast("ZIP creato in Download/FA-Export")
+        } catch (e: Exception) {
+            toast("Errore esportazione: ${e.localizedMessage ?: "operazione non riuscita"}")
+        }
     }
 
     private fun toast(message: String) =
