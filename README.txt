@@ -26,3 +26,10 @@ PROVA SU MOTOROLA
 3. Concedere i permessi Fotocamera e Posizione.
 4. Menu Chrome > Aggiungi a schermata Home / Installa app.
 5. Aprire FotoArchivio dall'icona e fare una prova con una foto non importante.
+
+
+## App Android nativa FA
+
+È stato aggiunto il progetto Android nativo in [FA-Android](FA-Android/README.md). La PWA HTML rimane disponibile come vecchio prototipo e non viene usata dalla nuova app.
+
+La compilazione APK è automatizzata con GitHub Actions: aprire la scheda Actions e selezionare **Build FA Android APK**. L'APK debug viene pubblicato come artifact al termine della compilazione.
