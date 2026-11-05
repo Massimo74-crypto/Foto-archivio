@@ -460,11 +460,21 @@ class MainActivity : ComponentActivity() {
         })
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        val bottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        root.addView(TextView(this).apply {
+            text = "Creato da M@xm@so 74 con ChatGPT"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF80664B.toInt())
+            setPadding(0, dp(6), 0, dp(8))
+        }, LinearLayout.LayoutParams(-1, -2))
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(18))
+        }
         bottom.addView(actionButton("AZIONI SELEZIONATE") { showBulkPhotoActions() },
-            LinearLayout.LayoutParams(0, dp(50), 1f))
+            LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(6) })
         bottom.addView(actionButton("CARTELLE") { showFolderList(explorerCategory) },
-            LinearLayout.LayoutParams(0, dp(50), 1f))
+            LinearLayout.LayoutParams(0, dp(50), 1f).apply { leftMargin = dp(6) })
         root.addView(bottom)
         setContentView(root)
     }
