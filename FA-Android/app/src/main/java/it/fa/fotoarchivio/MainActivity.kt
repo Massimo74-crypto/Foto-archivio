@@ -1,12 +1,10 @@
 package it.fa.fotoarchivio
 
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.ContentValues
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
-import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
@@ -19,12 +17,12 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
     private var activeCategory = "PERSONALE"
     private var pendingPhoto: Uri? = null
     private val prefs by lazy { getSharedPreferences("fa_settings", Context.MODE_PRIVATE) }
