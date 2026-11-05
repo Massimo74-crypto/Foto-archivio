@@ -373,24 +373,9 @@ class MainActivity : ComponentActivity() {
                     showExplorerFolder()
                 }.show()
         })
-        val sortSpinner = Spinner(this)
-        val sortValues = listOf("Data", "Nome", "Dimensione")
-        sortSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, sortValues)
-        sortSpinner.setSelection(sortValues.indexOf(sortMode).coerceAtLeast(0))
-        sortSpinner.onItemSelectedListener = SimpleItemSelectedListener {
-            val chosen = sortSpinner.selectedItem?.toString() ?: "Data"
-            if (chosen != sortMode) { sortMode = chosen; showExplorerFolder() }
-        }
-        root.addView(sortSpinner)
         val photos = listPhotos().filter {
             it.path.trimEnd('/') == "Pictures/FA/$explorerCategory/$explorerFolder"
-        }.let { found ->
-            when (sortMode) {
-                "Nome" -> found.sortedBy { it.name.lowercase(Locale.ROOT) }
-                "Dimensione" -> found.sortedByDescending { it.size }
-                else -> found.sortedByDescending { it.date }
-            }
-        }
+        }.sortedBy { it.name.lowercase(Locale.ROOT) }
         root.addView(TextView(this).apply {
             text = "${photos.size} foto  •  ${selectedPhotos.size} selezionate"
             textSize = 13f
@@ -415,11 +400,6 @@ class MainActivity : ComponentActivity() {
                 text = photo.name
                 textSize = 14f
                 setTextColor(0xFF172B45.toInt())
-            })
-            details.addView(TextView(this).apply {
-                text = if (photo.size > 0) "${photo.size / 1024} KB" else ""
-                textSize = 12f
-                setTextColor(0xFF64748B.toInt())
             })
             details.addView(actionButton("OPZIONI") { showPhotoActions(photo) })
             row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
