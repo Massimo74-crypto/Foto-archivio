@@ -325,8 +325,7 @@ class MainActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(-1, dp(54)))
         root.addView(actionButton("LAVORO") {
             explorerCategory = "LAVORO"
-            explorerFolder = prefs.getString(lastFolderKey(explorerCategory), "Generale") ?: "Generale"
-            showExplorerFolder()
+            showFolderList(explorerCategory)
         }, LinearLayout.LayoutParams(-1, dp(54)))
         root.addView(actionButton("GESTISCI SOTTOCARTELLE") { manageFolders() },
             LinearLayout.LayoutParams(-1, dp(48)))
