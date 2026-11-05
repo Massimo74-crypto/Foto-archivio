@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
+import android.view.Gravity
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
 import android.content.Intent
@@ -58,13 +59,17 @@ class MainActivity : ComponentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(28), dp(22), dp(22))
-            val watermark = getDrawable(R.drawable.fa_vintage_watermark)?.mutate()?.apply { alpha = 30 }
-            background = LayerDrawable(arrayOf(ColorDrawable(0xFFF4F6FA.toInt()), watermark!!))
+            val watermark = getDrawable(R.drawable.fa_vintage_watermark)?.mutate()?.apply { alpha = 88 }
+            val layers = LayerDrawable(arrayOf(ColorDrawable(0xFFF2E7D3.toInt()), watermark!!))
+            layers.setLayerGravity(1, Gravity.CENTER)
+            layers.setLayerWidth(1, dp(260))
+            layers.setLayerHeight(1, dp(260))
+            background = layers
         }
         root.addView(TextView(this).apply {
             text = title
             textSize = 29f
-            setTextColor(0xFF14243A.toInt())
+            setTextColor(0xFF493321.toInt())
             setPadding(0, 0, 0, dp(8))
         })
         return root
@@ -75,6 +80,8 @@ class MainActivity : ComponentActivity() {
             text = label
             textSize = 16f
             isAllCaps = false
+            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF765034.toInt())
+            setTextColor(0xFFFFF8EA.toInt())
             setOnClickListener { onClick() }
         }
 
@@ -84,13 +91,13 @@ class MainActivity : ComponentActivity() {
             text = "FOTO ARCHIVIO"
             textSize = 13f
             letterSpacing = 0.16f
-            setTextColor(0xFF53647A.toInt())
+            setTextColor(0xFF80664B.toInt())
             setPadding(0, 0, 0, dp(26))
         })
         root.addView(TextView(this).apply {
             text = "Dove vuoi archiviare le prossime foto?"
             textSize = 18f
-            setTextColor(0xFF1D2C40.toInt())
+            setTextColor(0xFF493321.toInt())
             setPadding(0, 0, 0, dp(12))
         })
         root.addView(actionButton("PERSONALE",) { activeCategory = "PERSONALE"; launchCamera() },
@@ -104,7 +111,7 @@ class MainActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "Le immagini vengono archiviate in Pictures/FA sul telefono."
             textSize = 13f
-            setTextColor(0xFF64748B.toInt())
+            setTextColor(0xFF80664B.toInt())
             setPadding(0, dp(22), 0, 0)
         })
         setContentView(root)
@@ -402,7 +409,7 @@ class MainActivity : ComponentActivity() {
             details.addView(TextView(this).apply {
                 text = photo.name
                 textSize = 14f
-                setTextColor(0xFF172B45.toInt())
+                setTextColor(0xFF493321.toInt())
             })
             details.addView(actionButton("OPZIONI") { showPhotoActions(photo) })
             row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
@@ -414,7 +421,7 @@ class MainActivity : ComponentActivity() {
                 }
             })
             list.addView(row)
-            list.addView(View(this).apply { setBackgroundColor(0xFFD8DEE8.toInt()) },
+            list.addView(View(this).apply { setBackgroundColor(0xFFD8C5A8.toInt()) },
                 LinearLayout.LayoutParams(-1, dp(1)))
         }
         if (photos.isEmpty()) list.addView(TextView(this).apply {
