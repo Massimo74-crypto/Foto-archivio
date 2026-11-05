@@ -170,7 +170,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void openNativeCamera() {
         try {
-            cameraTempFile = File.createTempFile("fotoarchivio_camera_", ".jpg", getCacheDir());
+            cameraTempFile = File.createTempFile("fotoarchivio_camera_", ".jpg", getFilesDir());
             cameraOutputUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", cameraTempFile);
             Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
             intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraOutputUri);
