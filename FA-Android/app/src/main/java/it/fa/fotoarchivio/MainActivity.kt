@@ -12,6 +12,7 @@ import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -123,6 +124,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun folderKey(category: String) = "folders_$category"
+    private fun lastFolderKey(category: String) = "last_folder_$category"
 
     private fun folders(category: String): MutableList<String> {
         val saved = prefs.getStringSet(folderKey(category), setOf("Generale"))?.toMutableList()
@@ -143,6 +145,12 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(8), dp(22), 0)
         }
+        val preview = ImageView(this).apply {
+            setImageURI(uri)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            adjustViewBounds = true
+            contentDescription = "Anteprima della foto appena scattata"
+        }
         val name = EditText(this).apply {
             hint = "Nome della foto"
             isSingleLine = true
@@ -153,12 +161,12 @@ class MainActivity : ComponentActivity() {
         val addFolder = Button(this).apply { text = "＋ Nuova sottocartella"; isAllCaps = false }
 
         fun refreshFolders(select: String? = null) {
-            val list = folders(categorySpinner.selectedItem?.toString() ?: activeCategory)
+            val category = categorySpinner.selectedItem?.toString() ?: activeCategory
+            val list = folders(category)
             folderSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, list)
-            if (select != null) {
-                val index = list.indexOf(select)
-                if (index >= 0) folderSpinner.setSelection(index)
-            }
+            val preferred = select ?: prefs.getString(lastFolderKey(category), "Generale")
+            val index = list.indexOf(preferred)
+            folderSpinner.setSelection(if (index >= 0) index else 0)
         }
 
         categorySpinner.adapter = ArrayAdapter(
@@ -185,6 +193,9 @@ class MainActivity : ComponentActivity() {
                 }.show()
         }
 
+        content.addView(preview, LinearLayout.LayoutParams(-1, dp(190)).apply {
+            bottomMargin = dp(12)
+        })
         content.addView(TextView(this).apply { text = "ARCHIVIA IN"; textSize = 12f; setTextColor(0xFF64748B.toInt()) })
         content.addView(categorySpinner)
         content.addView(folderSpinner)
@@ -221,6 +232,7 @@ class MainActivity : ComponentActivity() {
                 val folder = safeFolder(folderSpinner.selectedItem?.toString() ?: "Generale")
                 val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(".jpg")) baseName else "$baseName.jpg"
                 val path = "Pictures/FA/$category/$folder/"
+                prefs.edit().putString(lastFolderKey(category), folder).apply()
                 val values = ContentValues().apply {
                     put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                     put(MediaStore.Images.Media.RELATIVE_PATH, path)
