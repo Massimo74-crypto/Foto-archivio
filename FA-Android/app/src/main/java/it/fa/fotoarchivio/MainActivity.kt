@@ -1,6 +1,8 @@
 package it.fa.fotoarchivio
 
 import android.app.AlertDialog
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.LayerDrawable
 import android.content.ContentValues
 import android.net.Uri
 import android.os.Bundle
@@ -56,7 +58,8 @@ class MainActivity : ComponentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(28), dp(22), dp(22))
-            setBackgroundColor(0xFFF4F6FA.toInt())
+            val watermark = getDrawable(R.drawable.fa_vintage_watermark)?.mutate()?.apply { alpha = 30 }
+            background = LayerDrawable(arrayOf(ColorDrawable(0xFFF4F6FA.toInt()), watermark!!))
         }
         root.addView(TextView(this).apply {
             text = title
