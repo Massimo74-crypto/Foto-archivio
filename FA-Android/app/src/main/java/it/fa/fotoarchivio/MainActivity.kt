@@ -348,7 +348,9 @@ class MainActivity : ComponentActivity() {
 
     private fun showFolderList(category: String) {
         explorerCategory = category
-        val root = page(category)
+        val root = page(category).apply {
+            setPadding(dp(22), dp(28), dp(22), dp(48))
+        }
         root.addView(TextView(this).apply {
             text = "Pictures / FA / $category"
             textSize = 13f
@@ -460,8 +462,15 @@ class MainActivity : ComponentActivity() {
         })
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(ImageView(this).apply {
+            setImageResource(R.drawable.fa_launcher_icon_image)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Album fotografico vintage con macchina fotografica"
+        }, LinearLayout.LayoutParams(dp(278), dp(278)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+        })
         root.addView(TextView(this).apply {
-            text = "Creato da M@xm@so 74 con ChatGPT"
+            text = "Creato da M@xm@so74 con Chatgpt"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFF80664B.toInt())
