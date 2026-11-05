@@ -50,6 +50,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.statusBarColor = 0xFF10191F.toInt()
+        window.navigationBarColor = 0xFF05080B.toInt()
+        window.decorView.systemUiVisibility = 0
         showHome()
     }
 
@@ -58,19 +61,17 @@ class MainActivity : ComponentActivity() {
     private fun page(title: String): LinearLayout {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(28), dp(22), dp(22))
-            val watermark = getDrawable(R.drawable.fa_vintage_watermark_image)?.mutate()?.apply { alpha = 95 }
-            val layers = LayerDrawable(arrayOf(ColorDrawable(0xFFF2E7D3.toInt()), watermark!!))
-            layers.setLayerGravity(1, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
-            layers.setLayerInset(1, 0, dp(190), 0, 0)
-            layers.setLayerWidth(1, dp(265))
-            layers.setLayerHeight(1, dp(265))
-            background = layers
+            setPadding(dp(20), dp(18), dp(20), dp(16))
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF10191F.toInt(), 0xFF182128.toInt(), 0xFF0C1217.toInt())
+            )
         }
         root.addView(TextView(this).apply {
             text = title
-            textSize = 29f
-            setTextColor(0xFF493321.toInt())
+            textSize = 27f
+            typeface = android.graphics.Typeface.create("cursive", android.graphics.Typeface.BOLD)
+            setTextColor(0xFFF4EBDD.toInt())
             setPadding(0, 0, 0, dp(8))
         })
         return root
@@ -79,42 +80,99 @@ class MainActivity : ComponentActivity() {
     private fun actionButton(label: String, onClick: () -> Unit): Button =
         Button(this).apply {
             text = label
-            textSize = 16f
+            textSize = 15f
             isAllCaps = false
-            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF765034.toInt())
-            setTextColor(0xFFFFF8EA.toInt())
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            gravity = Gravity.CENTER
+            setTextColor(0xFFF7F5F0.toInt())
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0xFF294968.toInt(), 0xFF142B43.toInt())
+            ).apply {
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(2), 0xFF9DB9D2.toInt())
+            }
+            backgroundTintList = null
+            elevation = dp(3).toFloat()
+            setPadding(dp(8), dp(4), dp(8), dp(4))
             setOnClickListener { onClick() }
         }
 
     private fun showHome() {
-        val root = page("FA")
-        root.addView(TextView(this).apply {
-            text = "FOTO ARCHIVIO"
-            textSize = 13f
-            letterSpacing = 0.16f
-            setTextColor(0xFF80664B.toInt())
-            setPadding(0, 0, 0, dp(26))
+        val root = page("")
+        root.setPadding(dp(18), dp(12), dp(18), dp(14))
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(TextView(this).apply {
+            text = "📷"
+            textSize = 43f
+            setPadding(0, 0, dp(12), 0)
+        }, LinearLayout.LayoutParams(dp(68), dp(76)))
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heading.addView(TextView(this).apply {
+            text = "FA - Foto Archivio"
+            textSize = 30f
+            typeface = android.graphics.Typeface.create("cursive", android.graphics.Typeface.BOLD)
+            setTextColor(0xFFF7F1E7.toInt())
         })
-        root.addView(TextView(this).apply {
-            text = "Dove vuoi archiviare le prossime foto?"
-            textSize = 18f
-            setTextColor(0xFF493321.toInt())
-            setPadding(0, 0, 0, dp(12))
+        heading.addView(TextView(this).apply {
+            text = "Le tue foto, sempre con te"
+            textSize = 16f
+            typeface = android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL)
+            setTextColor(0xFFD8D5D0.toInt())
         })
-        root.addView(actionButton("PERSONALE",) { activeCategory = "PERSONALE"; launchCamera() },
-            LinearLayout.LayoutParams(-1, dp(58)).apply { bottomMargin = dp(10) })
-        root.addView(actionButton("LAVORO") { activeCategory = "LAVORO"; launchCamera() },
-            LinearLayout.LayoutParams(-1, dp(58)).apply { bottomMargin = dp(26) })
-        root.addView(actionButton("GESTIONE FOTO E CARTELLE") { showFileManager() },
-            LinearLayout.LayoutParams(-1, dp(52)))
-        root.addView(actionButton("ESPORTA SU PC / ZIP") { showExportOptions() },
-            LinearLayout.LayoutParams(-1, dp(52)))
-        root.addView(TextView(this).apply {
-            text = "Le immagini vengono archiviate in Pictures/FA sul telefono."
-            textSize = 13f
-            setTextColor(0xFF80664B.toInt())
-            setPadding(0, dp(22), 0, 0)
+        header.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(header, LinearLayout.LayoutParams(-1, dp(82)).apply {
+            bottomMargin = dp(12)
         })
+
+        val categories = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        categories.addView(actionButton("👤  PERSONALE   ←") {
+            activeCategory = "PERSONALE"
+            launchCamera()
+        }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { rightMargin = dp(7) })
+        categories.addView(actionButton("💼  LAVORO   ←") {
+            activeCategory = "LAVORO"
+            launchCamera()
+        }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { leftMargin = dp(7) })
+        root.addView(categories, LinearLayout.LayoutParams(-1, dp(70)).apply {
+            bottomMargin = dp(8)
+        })
+
+        root.addView(ImageView(this).apply {
+            setImageResource(R.drawable.fa_launcher_icon_image)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Fotocamera vintage su album fotografico"
+        }, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        root.addView(TextView(this).apply {
+            text = "Creato da M@xm@so74 con ChatGPT"
+            textSize = 16f
+            typeface = android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL)
+            gravity = Gravity.CENTER
+            setTextColor(0xFFE5D8C8.toInt())
+            setPadding(0, dp(3), 0, dp(10))
+        }, LinearLayout.LayoutParams(-1, -2))
+
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        bottom.addView(actionButton("▧  GESTIONE FOTO\nE CARTELLE") {
+            showFileManager()
+        }, LinearLayout.LayoutParams(0, dp(78), 1f).apply { rightMargin = dp(7) })
+        bottom.addView(actionButton("⇩  ESPORTA SU PC /\nZIP") {
+            showExportOptions()
+        }, LinearLayout.LayoutParams(0, dp(78), 1f).apply { leftMargin = dp(7) })
+        root.addView(bottom, LinearLayout.LayoutParams(-1, dp(78)))
+
         setContentView(root)
     }
 
@@ -215,14 +273,14 @@ class MainActivity : ComponentActivity() {
         content.addView(preview, LinearLayout.LayoutParams(-1, dp(190)).apply {
             bottomMargin = dp(12)
         })
-        content.addView(TextView(this).apply { text = "ARCHIVIA IN"; textSize = 12f; setTextColor(0xFF64748B.toInt()) })
+        content.addView(TextView(this).apply { text = "ARCHIVIA IN"; textSize = 12f; setTextColor(0xFFB9C4CF.toInt()) })
         content.addView(categorySpinner)
         content.addView(folderSpinner)
         content.addView(addFolder)
         content.addView(TextView(this).apply {
             text = "NOME FOTO"
             textSize = 12f
-            setTextColor(0xFF64748B.toInt())
+            setTextColor(0xFFB9C4CF.toInt())
             setPadding(0, dp(12), 0, 0)
         })
         content.addView(name)
@@ -316,7 +374,7 @@ class MainActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "Scegli l'archivio da esplorare"
             textSize = 15f
-            setTextColor(0xFF64748B.toInt())
+            setTextColor(0xFFB9C4CF.toInt())
             setPadding(0, 0, 0, dp(12))
         })
         root.addView(actionButton("PERSONALE") {
@@ -340,7 +398,7 @@ class MainActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "Pictures/FA  •  ${listPhotos().size} foto archiviate"
             textSize = 13f
-            setTextColor(0xFF64748B.toInt())
+            setTextColor(0xFFB9C4CF.toInt())
             setPadding(0, dp(12), 0, 0)
         })
         setContentView(root)
@@ -354,7 +412,7 @@ class MainActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "Pictures / FA / $category"
             textSize = 13f
-            setTextColor(0xFF64748B.toInt())
+            setTextColor(0xFFB9C4CF.toInt())
             setPadding(0, 0, 0, dp(12))
         })
         root.addView(actionButton("＋ NUOVA CARTELLA") {
@@ -387,12 +445,12 @@ class MainActivity : ComponentActivity() {
             }
             row.addView(TextView(this).apply { text = "📁"; textSize = 30f; setPadding(0, 0, dp(14), 0) })
             val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            labels.addView(TextView(this).apply { text = folder; textSize = 17f; setTextColor(0xFF493321.toInt()) })
-            labels.addView(TextView(this).apply { text = "$count elementi"; textSize = 12f; setTextColor(0xFF80664B.toInt()) })
+            labels.addView(TextView(this).apply { text = folder; textSize = 17f; setTextColor(0xFFF1E9DD.toInt()) })
+            labels.addView(TextView(this).apply { text = "$count elementi"; textSize = 12f; setTextColor(0xFFC7B9A7.toInt()) })
             row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(TextView(this).apply { text = "›"; textSize = 28f; setTextColor(0xFF80664B.toInt()) })
+            row.addView(TextView(this).apply { text = "›"; textSize = 28f; setTextColor(0xFFC7B9A7.toInt()) })
             list.addView(row, LinearLayout.LayoutParams(-1, -2))
-            list.addView(View(this).apply { setBackgroundColor(0xFFD8C5A8.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)))
+            list.addView(View(this).apply { setBackgroundColor(0xFF3D4B57.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)))
         }
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -405,13 +463,13 @@ class MainActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "Pictures / FA / $explorerCategory"
             textSize = 13f
-            setTextColor(0xFF64748B.toInt())
+            setTextColor(0xFFB9C4CF.toInt())
         })
         root.addView(actionButton("📁 CARTELLE") { showFolderList(explorerCategory) }, LinearLayout.LayoutParams(-1, dp(44)))
         root.addView(TextView(this).apply {
             text = "Cartella aperta: $explorerFolder"
             textSize = 15f
-            setTextColor(0xFF493321.toInt())
+            setTextColor(0xFFF1E9DD.toInt())
             setPadding(0, dp(8), 0, dp(8))
         })
         val photos = listPhotos().filter {
@@ -440,7 +498,7 @@ class MainActivity : ComponentActivity() {
             details.addView(TextView(this).apply {
                 text = photo.name
                 textSize = 14f
-                setTextColor(0xFF493321.toInt())
+                setTextColor(0xFFF1E9DD.toInt())
             })
             details.addView(actionButton("OPZIONI") { showPhotoActions(photo) })
             row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
@@ -452,7 +510,7 @@ class MainActivity : ComponentActivity() {
                 }
             })
             list.addView(row)
-            list.addView(View(this).apply { setBackgroundColor(0xFFD8C5A8.toInt()) },
+            list.addView(View(this).apply { setBackgroundColor(0xFF3D4B57.toInt()) },
                 LinearLayout.LayoutParams(-1, dp(1)))
         }
         if (photos.isEmpty()) list.addView(TextView(this).apply {
@@ -473,7 +531,7 @@ class MainActivity : ComponentActivity() {
             text = "Creato da M@xm@so74 con Chatgpt"
             textSize = 11f
             gravity = Gravity.CENTER
-            setTextColor(0xFF80664B.toInt())
+            setTextColor(0xFFC7B9A7.toInt())
             setPadding(0, dp(6), 0, dp(8))
         }, LinearLayout.LayoutParams(-1, -2))
         val bottom = LinearLayout(this).apply {
