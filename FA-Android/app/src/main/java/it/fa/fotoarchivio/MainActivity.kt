@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ImageView
@@ -27,6 +28,10 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private var activeCategory = "PERSONALE"
     private var pendingPhoto: Uri? = null
+    private val selectedPhotos = linkedSetOf<String>()
+    private var explorerCategory = "PERSONALE"
+    private var explorerFolder = "Generale"
+    private var sortMode = "Data"
     private val prefs by lazy { getSharedPreferences("fa_settings", Context.MODE_PRIVATE) }
 
     private val cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
@@ -295,53 +300,170 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showFileManager() {
-        val photos = listPhotos()
+        selectedPhotos.clear()
         val root = page("Archivio FA")
         root.addView(TextView(this).apply {
-            text = "Pictures/FA  •  ${photos.size} foto"
-            textSize = 14f
+            text = "Scegli l'archivio da esplorare"
+            textSize = 15f
             setTextColor(0xFF64748B.toInt())
-            setPadding(0, 0, 0, dp(16))
+            setPadding(0, 0, 0, dp(12))
         })
-        root.addView(actionButton("AGGIORNA ELENCO") { showFileManager() },
-            LinearLayout.LayoutParams(-1, dp(48)))
+        root.addView(actionButton("PERSONALE") {
+            explorerCategory = "PERSONALE"
+            explorerFolder = prefs.getString(lastFolderKey(explorerCategory), "Generale") ?: "Generale"
+            showExplorerFolder()
+        }, LinearLayout.LayoutParams(-1, dp(54)))
+        root.addView(actionButton("LAVORO") {
+            explorerCategory = "LAVORO"
+            explorerFolder = prefs.getString(lastFolderKey(explorerCategory), "Generale") ?: "Generale"
+            showExplorerFolder()
+        }, LinearLayout.LayoutParams(-1, dp(54)))
         root.addView(actionButton("GESTISCI SOTTOCARTELLE") { manageFolders() },
             LinearLayout.LayoutParams(-1, dp(48)))
-        root.addView(actionButton("INDIETRO") { showHome() },
+        root.addView(actionButton("ESPORTA ARCHIVIO ZIP") { exportZip(listPhotos(), "FA-Archivio") },
             LinearLayout.LayoutParams(-1, dp(48)))
-        val scroll = ScrollView(this)
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        if (photos.isEmpty()) {
-            list.addView(TextView(this).apply {
-                text = "Non ci sono ancora foto archiviate."
-                textSize = 16f
-                setPadding(0, dp(20), 0, 0)
-            })
-        } else {
-            photos.forEach { photo ->
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(0, dp(10), 0, dp(10))
-                }
-                row.addView(TextView(this).apply {
-                    text = photo.name
-                    textSize = 16f
-                    setTextColor(0xFF172B45.toInt())
-                })
-                row.addView(TextView(this).apply {
-                    text = photo.path
-                    textSize = 12f
-                    setTextColor(0xFF64748B.toInt())
-                })
-                row.addView(actionButton("GESTISCI") { showPhotoActions(photo) })
-                list.addView(row)
-                list.addView(View(this).apply { setBackgroundColor(0xFFD8DEE8.toInt()) },
-                    LinearLayout.LayoutParams(-1, dp(1)))
+        root.addView(actionButton("COLLEGA AL PC VIA USB") {
+            AlertDialog.Builder(this).setTitle("Trasferimento USB al PC")
+                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa → Pictures → FA. Copia PERSONALE e LAVORO sul PC.")
+                .setPositiveButton("OK", null).show()
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        root.addView(actionButton("INDIETRO") { showHome() }, LinearLayout.LayoutParams(-1, dp(48)))
+        root.addView(TextView(this).apply {
+            text = "Pictures/FA  •  ${listPhotos().size} foto archiviate"
+            textSize = 13f
+            setTextColor(0xFF64748B.toInt())
+            setPadding(0, dp(12), 0, 0)
+        })
+        setContentView(root)
+    }
+
+    private fun showExplorerFolder() {
+        val root = page(explorerCategory)
+        root.addView(TextView(this).apply {
+            text = "Pictures / FA / $explorerCategory"
+            textSize = 13f
+            setTextColor(0xFF64748B.toInt())
+        })
+        val foldersSpinner = Spinner(this)
+        val folderNames = folders(explorerCategory)
+        foldersSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, folderNames)
+        foldersSpinner.setSelection(folderNames.indexOf(explorerFolder).takeIf { it >= 0 } ?: 0)
+        foldersSpinner.onItemSelectedListener = SimpleItemSelectedListener {
+            val chosen = foldersSpinner.selectedItem?.toString() ?: "Generale"
+            if (chosen != explorerFolder) {
+                explorerFolder = chosen
+                prefs.edit().putString(lastFolderKey(explorerCategory), chosen).apply()
+                showExplorerFolder()
             }
         }
+        root.addView(foldersSpinner)
+        root.addView(actionButton("＋ CREA SOTTOCARTELLA") {
+            val input = EditText(this).apply { hint = "Nome nuova cartella" }
+            AlertDialog.Builder(this).setTitle("Nuova sottocartella").setView(input)
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Crea") { _, _ ->
+                    val newName = safeFolder(input.text.toString())
+                    val values = folders(explorerCategory)
+                    if (newName !in values) {
+                        values.add(newName)
+                        saveFolderList(explorerCategory, values)
+                    }
+                    explorerFolder = newName
+                    prefs.edit().putString(lastFolderKey(explorerCategory), newName).apply()
+                    showExplorerFolder()
+                }.show()
+        })
+        val sortSpinner = Spinner(this)
+        val sortValues = listOf("Data", "Nome", "Dimensione")
+        sortSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, sortValues)
+        sortSpinner.setSelection(sortValues.indexOf(sortMode).coerceAtLeast(0))
+        sortSpinner.onItemSelectedListener = SimpleItemSelectedListener {
+            val chosen = sortSpinner.selectedItem?.toString() ?: "Data"
+            if (chosen != sortMode) { sortMode = chosen; showExplorerFolder() }
+        }
+        root.addView(sortSpinner)
+        val photos = listPhotos().filter {
+            it.path.trimEnd('/') == "Pictures/FA/$explorerCategory/$explorerFolder"
+        }.let { found ->
+            when (sortMode) {
+                "Nome" -> found.sortedBy { it.name.lowercase(Locale.ROOT) }
+                "Dimensione" -> found.sortedByDescending { it.size }
+                else -> found.sortedByDescending { it.date }
+            }
+        }
+        root.addView(TextView(this).apply {
+            text = "${photos.size} foto  •  ${selectedPhotos.size} selezionate"
+            textSize = 13f
+            setPadding(0, dp(6), 0, dp(6))
+        })
+        val scroll = ScrollView(this)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        photos.forEach { photo ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, dp(6), 0, dp(6))
+            }
+            val thumb = ImageView(this).apply {
+                setImageURI(photo.uri)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                contentDescription = photo.name
+            }
+            row.addView(thumb, LinearLayout.LayoutParams(dp(66), dp(66)))
+            val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            details.addView(TextView(this).apply {
+                text = photo.name
+                textSize = 14f
+                setTextColor(0xFF172B45.toInt())
+            })
+            details.addView(TextView(this).apply {
+                text = if (photo.size > 0) "${photo.size / 1024} KB" else ""
+                textSize = 12f
+                setTextColor(0xFF64748B.toInt())
+            })
+            details.addView(actionButton("OPZIONI") { showPhotoActions(photo) })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(CheckBox(this).apply {
+                isChecked = selectedPhotos.contains(photo.uri.toString())
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedPhotos.add(photo.uri.toString())
+                    else selectedPhotos.remove(photo.uri.toString())
+                }
+            })
+            list.addView(row)
+            list.addView(View(this).apply { setBackgroundColor(0xFFD8DEE8.toInt()) },
+                LinearLayout.LayoutParams(-1, dp(1)))
+        }
+        if (photos.isEmpty()) list.addView(TextView(this).apply {
+            text = "Questa sottocartella è vuota."
+            textSize = 16f
+            setPadding(0, dp(18), 0, 0)
+        })
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val bottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        bottom.addView(actionButton("AZIONI SELEZIONATE") { showBulkPhotoActions() },
+            LinearLayout.LayoutParams(0, dp(50), 1f))
+        bottom.addView(actionButton("INDIETRO") { showFileManager() },
+            LinearLayout.LayoutParams(0, dp(50), 1f))
+        root.addView(bottom)
         setContentView(root)
+    }
+
+    private fun showBulkPhotoActions() {
+        val chosen = listPhotos().filter { selectedPhotos.contains(it.uri.toString()) }
+        if (chosen.isEmpty()) { toast("Seleziona prima una o più foto"); return }
+        AlertDialog.Builder(this).setTitle("${chosen.size} foto selezionate")
+            .setItems(arrayOf("Esporta selezione in ZIP", "Elimina selezione")) { _, which ->
+                if (which == 0) exportZip(chosen, "FA-Selezione")
+                else AlertDialog.Builder(this).setMessage("Eliminare definitivamente le foto selezionate?")
+                    .setNegativeButton("Annulla", null)
+                    .setPositiveButton("Elimina") { _, _ ->
+                        chosen.forEach { contentResolver.delete(it.uri, null, null) }
+                        selectedPhotos.clear()
+                        showExplorerFolder()
+                    }.show()
+            }.show()
     }
 
     private fun showPhotoActions(photo: PhotoItem) {
