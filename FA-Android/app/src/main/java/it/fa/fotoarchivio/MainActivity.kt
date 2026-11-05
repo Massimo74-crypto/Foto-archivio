@@ -59,9 +59,10 @@ class MainActivity : ComponentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(28), dp(22), dp(22))
-            val watermark = getDrawable(R.drawable.fa_vintage_watermark_image)?.mutate()?.apply { alpha = 88 }
+            val watermark = getDrawable(R.drawable.fa_vintage_watermark_image)?.mutate()?.apply { alpha = 18 }
             val layers = LayerDrawable(arrayOf(ColorDrawable(0xFFF2E7D3.toInt()), watermark!!))
             layers.setLayerGravity(1, Gravity.CENTER)
+            layers.setLayerInset(1, 0, dp(40), 0, 0)
             layers.setLayerWidth(1, dp(260))
             layers.setLayerHeight(1, dp(260))
             background = layers
@@ -320,8 +321,7 @@ class MainActivity : ComponentActivity() {
         })
         root.addView(actionButton("PERSONALE") {
             explorerCategory = "PERSONALE"
-            explorerFolder = prefs.getString(lastFolderKey(explorerCategory), "Generale") ?: "Generale"
-            showExplorerFolder()
+            showFolderList(explorerCategory)
         }, LinearLayout.LayoutParams(-1, dp(54)))
         root.addView(actionButton("LAVORO") {
             explorerCategory = "LAVORO"
@@ -347,6 +347,58 @@ class MainActivity : ComponentActivity() {
         setContentView(root)
     }
 
+    private fun showFolderList(category: String) {
+        explorerCategory = category
+        val root = page(category)
+        root.addView(TextView(this).apply {
+            text = "Pictures / FA / $category"
+            textSize = 13f
+            setTextColor(0xFF64748B.toInt())
+            setPadding(0, 0, 0, dp(12))
+        })
+        root.addView(actionButton("＋ NUOVA CARTELLA") {
+            val input = EditText(this).apply { hint = "Nome nuova cartella" }
+            AlertDialog.Builder(this).setTitle("Crea cartella").setView(input)
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Crea") { _, _ ->
+                    val newName = safeFolder(input.text.toString())
+                    val values = folders(category)
+                    if (newName !in values) { values.add(newName); saveFolderList(category, values) }
+                    explorerFolder = newName
+                    prefs.edit().putString(lastFolderKey(category), newName).apply()
+                    showExplorerFolder()
+                }.show()
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        val allPhotos = listPhotos().filter { it.path.startsWith("Pictures/FA/$category/") }
+        val scroll = ScrollView(this)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        folders(category).forEach { folder ->
+            val count = allPhotos.count { it.path.trimEnd('/') == "Pictures/FA/$category/$folder" }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(12), dp(8), dp(12))
+                setOnClickListener {
+                    explorerFolder = folder
+                    prefs.edit().putString(lastFolderKey(category), folder).apply()
+                    showExplorerFolder()
+                }
+            }
+            row.addView(TextView(this).apply { text = "📁"; textSize = 30f; setPadding(0, 0, dp(14), 0) })
+            val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            labels.addView(TextView(this).apply { text = folder; textSize = 17f; setTextColor(0xFF493321.toInt()) })
+            labels.addView(TextView(this).apply { text = "$count elementi"; textSize = 12f; setTextColor(0xFF80664B.toInt()) })
+            row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(TextView(this).apply { text = "›"; textSize = 28f; setTextColor(0xFF80664B.toInt()) })
+            list.addView(row, LinearLayout.LayoutParams(-1, -2))
+            list.addView(View(this).apply { setBackgroundColor(0xFFD8C5A8.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)))
+        }
+        scroll.addView(list)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(actionButton("INDIETRO") { showFileManager() }, LinearLayout.LayoutParams(-1, dp(48)))
+        setContentView(root)
+    }
+
     private fun showExplorerFolder() {
         val root = page(explorerCategory)
         root.addView(TextView(this).apply {
@@ -354,34 +406,12 @@ class MainActivity : ComponentActivity() {
             textSize = 13f
             setTextColor(0xFF64748B.toInt())
         })
-        val foldersSpinner = Spinner(this)
-        val folderNames = folders(explorerCategory)
-        foldersSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, folderNames)
-        foldersSpinner.setSelection(folderNames.indexOf(explorerFolder).takeIf { it >= 0 } ?: 0)
-        foldersSpinner.onItemSelectedListener = SimpleItemSelectedListener {
-            val chosen = foldersSpinner.selectedItem?.toString() ?: "Generale"
-            if (chosen != explorerFolder) {
-                explorerFolder = chosen
-                prefs.edit().putString(lastFolderKey(explorerCategory), chosen).apply()
-                showExplorerFolder()
-            }
-        }
-        root.addView(foldersSpinner)
-        root.addView(actionButton("＋ CREA SOTTOCARTELLA") {
-            val input = EditText(this).apply { hint = "Nome nuova cartella" }
-            AlertDialog.Builder(this).setTitle("Nuova sottocartella").setView(input)
-                .setNegativeButton("Annulla", null)
-                .setPositiveButton("Crea") { _, _ ->
-                    val newName = safeFolder(input.text.toString())
-                    val values = folders(explorerCategory)
-                    if (newName !in values) {
-                        values.add(newName)
-                        saveFolderList(explorerCategory, values)
-                    }
-                    explorerFolder = newName
-                    prefs.edit().putString(lastFolderKey(explorerCategory), newName).apply()
-                    showExplorerFolder()
-                }.show()
+        root.addView(actionButton("📁 CARTELLE") { showFolderList(explorerCategory) }, LinearLayout.LayoutParams(-1, dp(44)))
+        root.addView(TextView(this).apply {
+            text = "Cartella aperta: $explorerFolder"
+            textSize = 15f
+            setTextColor(0xFF493321.toInt())
+            setPadding(0, dp(8), 0, dp(8))
         })
         val photos = listPhotos().filter {
             it.path.trimEnd('/') == "Pictures/FA/$explorerCategory/$explorerFolder"
@@ -434,7 +464,7 @@ class MainActivity : ComponentActivity() {
         val bottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bottom.addView(actionButton("AZIONI SELEZIONATE") { showBulkPhotoActions() },
             LinearLayout.LayoutParams(0, dp(50), 1f))
-        bottom.addView(actionButton("INDIETRO") { showFileManager() },
+        bottom.addView(actionButton("CARTELLE") { showFolderList(explorerCategory) },
             LinearLayout.LayoutParams(0, dp(50), 1f))
         root.addView(bottom)
         setContentView(root)
