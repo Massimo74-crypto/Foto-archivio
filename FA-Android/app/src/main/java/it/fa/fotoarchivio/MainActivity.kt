@@ -544,36 +544,12 @@ class MainActivity : ComponentActivity() {
                             if (cursor.moveToFirst()) cursor.getString(0) else null
                         }
                     } catch (_: Exception) { null }
-                    val resolvedSourceUri = try {
-                        if (android.provider.DocumentsContract.isDocumentUri(this, uri) &&
-                            uri.authority == "com.android.providers.media.documents") {
-                            val documentId = android.provider.DocumentsContract.getDocumentId(uri)
-                            val parts = documentId.split(":")
-                            if (parts.size == 2) {
-                                val sourceCollection = if (parts[0].startsWith("video"))
-                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                                else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                                Uri.withAppendedPath(sourceCollection, parts[1])
-                            } else uri
-                        } else uri
-                    } catch (_: Exception) { uri }
-                    val resolvedSourcePath = try {
-                        contentResolver.query(
-                            resolvedSourceUri,
-                            arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
-                            null, null, null
-                        )?.use { cursor ->
-                            if (cursor.moveToFirst()) cursor.getString(0) else null
-                        }
-                    } catch (_: Exception) { null }
-                    // Un percorso esterno esplicito ha sempre la precedenza:
-                    // DCIM/Camera non può mai essere scambiata per un file già in FA.
                     val expectedRoot = if (isVideo) "Movies/FA/" else "Pictures/FA/"
                     // Aggiorniamo in-place SOLO se l'URI originale dichiara direttamente
                     // un percorso FA. Se il percorso diretto non è verificabile, copiamo:
                     // mai rischiare di spostare o riutilizzare l'originale di DCIM/Camera.
                     val alreadyInFa = directSourcePath?.startsWith(expectedRoot) == true
-                    val sourceUri = if (alreadyInFa) uri else uri
+                    val sourceUri = uri
                     if (alreadyInFa) {
                         contentResolver.update(sourceUri, values, null, null) > 0
                     } else {
