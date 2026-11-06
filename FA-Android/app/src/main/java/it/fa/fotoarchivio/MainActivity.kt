@@ -281,19 +281,50 @@ class MainActivity : ComponentActivity() {
     private fun folderKey(category: String) = "folders_$category"
     private fun lastFolderKey(category: String) = "last_folder_$category"
 
+    // I percorsi sono relativi alla categoria, ad esempio AMMEGA/CARTEGGIATRICE/RECINZIONE.
     private fun folders(category: String): MutableList<String> {
-        val saved = prefs.getStringSet(folderKey(category), setOf("Generale"))?.toMutableList()
-            ?: mutableListOf("Generale")
-        if (saved.isEmpty()) saved.add("Generale")
-        return saved.sorted().toMutableList()
+        val saved = prefs.getStringSet(folderKey(category), setOf("Generale"))?.toMutableSet()
+            ?: mutableSetOf("Generale")
+        val expanded = mutableSetOf<String>()
+        saved.forEach { raw ->
+            val clean = raw.trim('/').split('/').filter { it.isNotBlank() }
+            var path = ""
+            clean.forEach { part ->
+                path = if (path.isEmpty()) safeFolder(part) else path + "/" + safeFolder(part)
+                expanded.add(path)
+            }
+        }
+        if (expanded.isEmpty()) expanded.add("Generale")
+        return expanded.sorted().toMutableList()
     }
 
     private fun saveFolderList(category: String, list: List<String>) {
         prefs.edit().putStringSet(folderKey(category), list.toSet()).apply()
     }
 
+    private fun folderChildren(category: String, parent: String): List<String> {
+        val prefix = if (parent.isBlank()) "" else parent.trimEnd('/') + "/"
+        return folders(category).mapNotNull { path ->
+            if (!path.startsWith(prefix) || path == parent) null
+            else path.removePrefix(prefix).substringBefore('/').takeIf { it.isNotBlank() }
+        }.distinct().sorted()
+    }
+
+    private fun addFolderPath(category: String, parent: String, child: String): String {
+        val part = safeFolder(child)
+        val full = if (parent.isBlank()) part else parent.trimEnd('/') + "/" + part
+        val all = folders(category).toMutableSet()
+        var current = ""
+        full.split('/').forEach { segment ->
+            current = if (current.isEmpty()) segment else current + "/" + segment
+            all.add(current)
+        }
+        saveFolderList(category, all.toList())
+        return full
+    }
+
     private fun safeFolder(value: String): String =
-        value.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Generale" }
+        value.trim().replace(Regex("[\\\\/:*?""<>|]"), "_").ifBlank { "Generale" }
 
     private fun showNextImportedItem() {
         if (importQueue.isEmpty()) {
@@ -395,19 +426,15 @@ class MainActivity : ComponentActivity() {
         categorySpinner.onItemSelectedListener = SimpleItemSelectedListener { refreshFolders() }
         addFolder.setOnClickListener {
             val input = darkEditText("Nome nuova sottocartella")
-            AlertDialog.Builder(this)
+            AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("Nuova sottocartella")
                 .setView(input)
                 .setNegativeButton("Annulla", null)
                 .setPositiveButton("Crea") { _, _ ->
                     val category = categorySpinner.selectedItem.toString()
-                    val newName = safeFolder(input.text.toString())
-                    val list = folders(category)
-                    if (newName.isNotBlank() && !list.contains(newName)) {
-                        list.add(newName)
-                        saveFolderList(category, list)
-                        refreshFolders(newName)
-                    }
+                    val parent = folderSpinner.selectedItem?.toString() ?: ""
+                    val newName = input.text.toString().trim()
+                    if (newName.isNotBlank()) refreshFolders(addFolderPath(category, parent, newName))
                 }.show()
         }
 
@@ -434,7 +461,7 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(24), dp(18), dp(24), dp(8))
             setBackgroundColor(0xFF17232C.toInt())
         }
-        val dialog = AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setCustomTitle(dialogTitle)
             .setView(content)
             .setCancelable(false)
@@ -596,7 +623,7 @@ class MainActivity : ComponentActivity() {
         root.addView(actionButton("ESPORTA ARCHIVIO ZIP") { exportZip(listPhotos(), "FA-Archivio") },
             LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("COLLEGA AL PC VIA USB") {
-            AlertDialog.Builder(this).setTitle("Trasferimento USB al PC")
+            AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
                 .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA e i video in Movies → FA: copia PERSONALE e LAVORO da entrambe le posizioni.")
                 .setPositiveButton("OK", null).show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
@@ -612,87 +639,135 @@ class MainActivity : ComponentActivity() {
 
     private fun showFolderList(category: String) {
         explorerCategory = category
-        val root = page(category).apply {
-            setPadding(dp(22), dp(28), dp(22), dp(48))
-        }
-        root.addView(TextView(this).apply {
-            text = "Archivio FA / $category"
-            textSize = 13f
-            setTextColor(0xFFB9C4CF.toInt())
-            setPadding(0, 0, 0, dp(12))
-        })
-        root.addView(actionButton("＋ NUOVA CARTELLA") {
-            val input = darkEditText("Nome nuova cartella")
-            AlertDialog.Builder(this).setTitle("Crea cartella").setView(input)
-                .setNegativeButton("Annulla", null)
-                .setPositiveButton("Crea") { _, _ ->
-                    val newName = safeFolder(input.text.toString())
-                    val values = folders(category)
-                    if (newName !in values) { values.add(newName); saveFolderList(category, values) }
-                    explorerFolder = newName
-                    prefs.edit().putString(lastFolderKey(category), newName).apply()
-                    showExplorerFolder()
-                }.show()
-        }, LinearLayout.LayoutParams(-1, dp(48)))
-        val allPhotos = listPhotos().filter { isInCategory(it.path, category) }
-        val scroll = ScrollView(this)
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        folders(category).forEach { folder ->
-            val count = allPhotos.count { it.path.trimEnd('/').endsWith("/$category/$folder") }
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(12), dp(8), dp(12))
-                setOnClickListener {
-                    explorerFolder = folder
-                    prefs.edit().putString(lastFolderKey(category), folder).apply()
+        explorerFolder = ""
+        prefs.edit().putString(lastFolderKey(category), "").apply()
+        showExplorerFolder()
+    }
+
+    private fun createChildFolder(parent: String) {
+        val input = darkEditText("Nome nuova cartella")
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle(if (parent.isBlank()) "Nuova cartella" else "Nuova sottocartella in " + parent)
+            .setView(input)
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Crea") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isBlank()) {
+                    toast("Inserisci un nome")
+                } else {
+                    explorerFolder = addFolderPath(explorerCategory, parent, name)
+                    prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
                     showExplorerFolder()
                 }
-            }
-            row.addView(TextView(this).apply { text = "📁"; textSize = 30f; setPadding(0, 0, dp(14), 0) })
-            val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            labels.addView(TextView(this).apply { text = folder; textSize = 17f; setTextColor(0xFFF1E9DD.toInt()) })
-            labels.addView(TextView(this).apply { text = "$count elementi"; textSize = 12f; setTextColor(0xFFC7B9A7.toInt()) })
-            row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(TextView(this).apply { text = "›"; textSize = 28f; setTextColor(0xFFC7B9A7.toInt()) })
-            list.addView(row, LinearLayout.LayoutParams(-1, -2))
-            list.addView(View(this).apply { setBackgroundColor(0xFF3D4B57.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)))
-        }
-        scroll.addView(list)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(actionButton("INDIETRO") { showFileManager() }, LinearLayout.LayoutParams(-1, dp(48)))
-        setContentView(root)
+            }.show()
     }
 
     private fun showExplorerFolder() {
         val root = page(explorerCategory)
+        val current = explorerFolder.trim('/')
+        val titlePath = if (current.isBlank()) "Archivio " + explorerCategory
+            else "Archivio " + explorerCategory + " / " + current
         root.addView(TextView(this).apply {
-            text = "Archivio FA / $explorerCategory"
-            textSize = 13f
-            setTextColor(0xFFB9C4CF.toInt())
-        })
-        root.addView(actionButton("📁 CARTELLE") { showFolderList(explorerCategory) }, LinearLayout.LayoutParams(-1, dp(44)))
-        root.addView(TextView(this).apply {
-            text = "Cartella aperta: $explorerFolder"
+            text = titlePath
             textSize = 15f
             setTextColor(0xFFF1E9DD.toInt())
-            setPadding(0, dp(8), 0, dp(8))
+            setPadding(0, 0, 0, dp(8))
         })
-        val photos = listPhotos().filter {
-            isInCategory(it.path, explorerCategory) &&
-                it.path.trimEnd('/').endsWith("/$explorerCategory/$explorerFolder")
+        val crumbs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val parts = current.split('/').filter { it.isNotBlank() }
+        val crumbLabels = mutableListOf("⌂")
+        var built = ""
+        parts.forEach { part ->
+            built = if (built.isEmpty()) part else built + "/" + part
+            crumbLabels.add(built)
+        }
+        crumbLabels.forEachIndexed { index, value ->
+            crumbs.addView(actionButton(if (index == 0) "⌂" else parts[index - 1]) {
+                explorerFolder = if (index == 0) "" else value
+                prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
+                showExplorerFolder()
+            }, LinearLayout.LayoutParams(-2, dp(40)).apply { rightMargin = dp(4) })
+        }
+        root.addView(ScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(crumbs) },
+            LinearLayout.LayoutParams(-1, dp(46)))
+        root.addView(actionButton("＋ NUOVA SOTTOCARTELLA") {
+            createChildFolder(current)
+        }, LinearLayout.LayoutParams(-1, dp(46)))
+        if (current.isNotBlank()) {
+            root.addView(actionButton("↑ CARTELLA SUPERIORE") {
+                explorerFolder = current.substringBeforeLast('/', "")
+                prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
+                showExplorerFolder()
+            }, LinearLayout.LayoutParams(-1, dp(42)))
+        } else {
+            root.addView(actionButton("← GESTIONE ARCHIVIO") { showFileManager() },
+                LinearLayout.LayoutParams(-1, dp(42)))
+        }
+
+        val children = folderChildren(explorerCategory, current)
+        val allItems = listPhotos().filter { isInCategory(it.path, explorerCategory) }
+        val exactRelative = current.trim('/')
+        val photos = allItems.filter {
+            val relative = it.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+            relative == exactRelative
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
+        val descendantCount = allItems.count {
+            val relative = it.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+            if (exactRelative.isBlank()) relative.isNotBlank()
+            else relative.startsWith(exactRelative + "/")
+        }
         root.addView(TextView(this).apply {
-            text = "${photos.count { !it.isVideo }} foto  •  ${photos.count { it.isVideo }} video  •  ${selectedPhotos.size} selezionati"
-            textSize = 13f
+            text = children.size.toString() + " cartelle  •  " + photos.count { !it.isVideo } +
+                " foto  •  " + photos.count { it.isVideo } + " video" +
+                (if (descendantCount > 0) "  •  " + descendantCount + " elementi nelle sottocartelle" else "")
+            textSize = 12f
+            setTextColor(0xFFC7B9A7.toInt())
             setPadding(0, dp(6), 0, dp(6))
         })
         val scroll = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        children.forEach { child ->
+            val fullPath = if (current.isBlank()) child else current + "/" + child
+            val count = allItems.count {
+                val relative = it.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+                relative == fullPath || relative.startsWith(fullPath + "/")
+            }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(10), dp(8), dp(10))
+            }
+            row.addView(TextView(this).apply {
+                text = "📁"
+                textSize = 27f
+                setPadding(0, 0, dp(12), 0)
+            })
+            val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            labels.addView(TextView(this).apply {
+                text = child
+                textSize = 16f
+                setTextColor(0xFFF1E9DD.toInt())
+            })
+            labels.addView(TextView(this).apply {
+                text = count.toString() + " elementi"
+                textSize = 12f
+                setTextColor(0xFFC7B9A7.toInt())
+            })
+            row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(actionButton("APRI") {
+                explorerFolder = fullPath
+                prefs.edit().putString(lastFolderKey(explorerCategory), fullPath).apply()
+                showExplorerFolder()
+            })
+            row.addView(actionButton("⋮") { folderActions(fullPath) })
+            list.addView(row)
+            list.addView(View(this).apply { setBackgroundColor(0xFF3D4B57.toInt()) },
+                LinearLayout.LayoutParams(-1, dp(1)))
+        }
         photos.forEach { photo ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(6), 0, dp(6))
             }
             val thumb = ImageView(this).apply {
@@ -726,9 +801,10 @@ class MainActivity : ComponentActivity() {
             list.addView(View(this).apply { setBackgroundColor(0xFF3D4B57.toInt()) },
                 LinearLayout.LayoutParams(-1, dp(1)))
         }
-        if (photos.isEmpty()) list.addView(TextView(this).apply {
-            text = "Questa sottocartella è vuota."
-            textSize = 16f
+        if (children.isEmpty() && photos.isEmpty()) list.addView(TextView(this).apply {
+            text = "Questa cartella è vuota. Puoi creare una sottocartella con il pulsante qui sopra."
+            textSize = 15f
+            setTextColor(0xFFF1E9DD.toInt())
             setPadding(0, dp(18), 0, 0)
         })
         scroll.addView(list)
@@ -737,17 +813,16 @@ class MainActivity : ComponentActivity() {
             setImageResource(R.drawable.fa_home_image)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "Fotocamera vintage su album fotografico"
-        }, LinearLayout.LayoutParams(-1, 0, 1f))
+        }, LinearLayout.LayoutParams(-1, 0, 0.45f))
         root.addView(TextView(this).apply {
             text = "Creato da M@xm@so74 con Chatgpt"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(0xFFC7B9A7.toInt())
-            setPadding(0, dp(6), 0, dp(8))
+            setPadding(0, dp(4), 0, dp(6))
         }, LinearLayout.LayoutParams(-1, -2))
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            // Solleva i pulsanti dalla barra di navigazione inferiore Motorola.
             setPadding(0, 0, 0, dp(42))
         }
         bottom.addView(actionButton("AZIONI SELEZIONATE") { showBulkPhotoActions() },
@@ -758,13 +833,76 @@ class MainActivity : ComponentActivity() {
         setContentView(root)
     }
 
+    private fun folderActions(path: String) {
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle(path)
+            .setItems(arrayOf("Rinomina", "Elimina cartella")) { _, which ->
+                if (which == 0) renameFolderPath(path) else deleteFolderPath(path)
+            }.show()
+    }
+
+    private fun renameFolderPath(oldPath: String) {
+        val input = darkEditText("Nuovo nome", oldPath.substringAfterLast('/')).apply { selectAll() }
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Rinomina cartella")
+            .setView(input)
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Rinomina") { _, _ ->
+                val newPart = safeFolder(input.text.toString())
+                val parent = oldPath.substringBeforeLast('/', "")
+                val newPath = if (parent.isBlank()) newPart else parent + "/" + newPart
+                if (newPath != oldPath) {
+                    val all = folders(explorerCategory).toMutableSet()
+                    val changed = all.map { value ->
+                        if (value == oldPath || value.startsWith(oldPath + "/"))
+                            newPath + value.removePrefix(oldPath) else value
+                    }.toSet()
+                    saveFolderList(explorerCategory, changed.toList())
+                    listPhotos().filter { isInCategory(it.path, explorerCategory) }.forEach { item ->
+                        val relative = item.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+                        if (relative == oldPath || relative.startsWith(oldPath + "/")) {
+                            val rootName = if (item.isVideo) "Movies" else "Pictures"
+                            val updatedPath = rootName + "/FA/" + explorerCategory + "/" +
+                                newPath + relative.removePrefix(oldPath) + "/"
+                            contentResolver.update(item.uri, ContentValues().apply {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, updatedPath)
+                            }, null, null)
+                        }
+                    }
+                    if (explorerFolder == oldPath || explorerFolder.startsWith(oldPath + "/"))
+                        explorerFolder = newPath + explorerFolder.removePrefix(oldPath)
+                    prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
+                }
+                showExplorerFolder()
+            }.show()
+    }
+
+    private fun deleteFolderPath(path: String) {
+        val hasChildren = folders(explorerCategory).any { it.startsWith(path + "/") }
+        val hasMedia = listPhotos().any { item ->
+            if (!isInCategory(item.path, explorerCategory)) false
+            else {
+                val relative = item.path.substringAfter("/FA/" + explorerCategory, "").trim('/')
+                relative == path || relative.startsWith(path + "/")
+            }
+        }
+        if (hasChildren || hasMedia) {
+            toast("Cartella non vuota: elimina prima il contenuto e le sottocartelle")
+            return
+        }
+        saveFolderList(explorerCategory, folders(explorerCategory).filterNot {
+            it == path || it.startsWith(path + "/")
+        })
+        showExplorerFolder()
+    }
+
     private fun showBulkPhotoActions() {
         val chosen = listPhotos().filter { selectedPhotos.contains(it.uri.toString()) }
         if (chosen.isEmpty()) { toast("Seleziona prima uno o più elementi"); return }
-        AlertDialog.Builder(this).setTitle("${chosen.size} elementi selezionati")
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("${chosen.size} elementi selezionati")
             .setItems(arrayOf("Esporta selezione in ZIP", "Elimina selezione")) { _, which ->
                 if (which == 0) exportZip(chosen, "FA-Selezione")
-                else AlertDialog.Builder(this).setMessage("Eliminare definitivamente gli elementi selezionati?")
+                else AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setMessage("Eliminare definitivamente gli elementi selezionati?")
                     .setNegativeButton("Annulla", null)
                     .setPositiveButton("Elimina") { _, _ ->
                         chosen.forEach { contentResolver.delete(it.uri, null, null) }
@@ -775,14 +913,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showPhotoActions(photo: PhotoItem) {
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle(photo.name)
             .setItems(arrayOf("Apri", "Rinomina", "Sposta in un'altra cartella", "Elimina")) { _, which ->
                 when (which) {
                     0 -> openMediaItem(photo)
                     1 -> renamePhoto(photo)
                     2 -> movePhoto(photo)
-                    3 -> AlertDialog.Builder(this)
+                    3 -> AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                         .setMessage("Eliminare definitivamente questo elemento?")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Elimina") { _, _ ->
@@ -807,7 +945,7 @@ class MainActivity : ComponentActivity() {
 
     private fun renamePhoto(photo: PhotoItem) {
         val input = darkEditText(initialText = photo.name.substringBeforeLast('.')).apply { selectAll() }
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Rinomina elemento")
             .setView(input)
             .setNegativeButton("Annulla", null)
@@ -837,7 +975,7 @@ class MainActivity : ComponentActivity() {
         refresh()
         layout.addView(category)
         layout.addView(folder)
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Sposta elemento")
             .setView(layout)
             .setNegativeButton("Annulla", null)
@@ -854,14 +992,14 @@ class MainActivity : ComponentActivity() {
         listOf("PERSONALE", "LAVORO").forEach { cat ->
             folders(cat).forEach { entries.add("$cat  /  $it") }
         }
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Sottocartelle")
             .setItems(entries.toTypedArray()) { _, index ->
                 val selected = entries[index]
                 val category = selected.substringBefore("  /  ")
                 val oldName = selected.substringAfter("  /  ")
                 val input = darkEditText(initialText = oldName).apply { selectAll() }
-                AlertDialog.Builder(this)
+                AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                     .setTitle("Rinomina sottocartella")
                     .setView(input)
                     .setNegativeButton("Annulla", null)
@@ -896,14 +1034,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showExportOptions() {
-        AlertDialog.Builder(this).setTitle("Esporta archivio")
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Esporta archivio")
             .setItems(arrayOf("Tutto l'archivio in ZIP", "Solo PERSONALE in ZIP", "Solo LAVORO in ZIP", "Istruzioni collegamento USB")) { _, which ->
                 val all = listPhotos()
                 when (which) {
                     0 -> exportZip(all, "FA-Archivio")
                     1 -> exportZip(all.filter { isInCategory(it.path, "PERSONALE") }, "FA-PERSONALE")
                     2 -> exportZip(all.filter { isInCategory(it.path, "LAVORO") }, "FA-LAVORO")
-                    3 -> AlertDialog.Builder(this).setTitle("Trasferimento USB al PC")
+                    3 -> AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
                         .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA e i video in Movies → FA; copia le cartelle PERSONALE e LAVORO da entrambe le posizioni.")
                         .setPositiveButton("OK", null).show()
                 }
