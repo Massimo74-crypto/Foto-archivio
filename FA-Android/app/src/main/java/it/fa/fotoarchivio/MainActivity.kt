@@ -167,11 +167,11 @@ class MainActivity : ComponentActivity() {
         }
         bottom.addView(actionButton("▧  GESTIONE FOTO\nE CARTELLE") {
             showFileManager()
-        }, LinearLayout.LayoutParams(0, dp(78), 1f).apply { rightMargin = dp(7) })
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(7) })
         bottom.addView(actionButton("⇩  ESPORTA SU PC /\nZIP") {
             showExportOptions()
-        }, LinearLayout.LayoutParams(0, dp(78), 1f).apply { leftMargin = dp(7) })
-        root.addView(bottom, LinearLayout.LayoutParams(-1, dp(78)))
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(7) })
+        root.addView(bottom, LinearLayout.LayoutParams(-1, dp(48)))
 
         setContentView(root)
     }
@@ -228,32 +228,60 @@ class MainActivity : ComponentActivity() {
             adjustViewBounds = true
             contentDescription = "Anteprima della foto appena scattata"
         }
+        content.setBackgroundColor(0xFF17232C.toInt())
         val name = EditText(this).apply {
             hint = "Nome della foto"
             isSingleLine = true
             textSize = 18f
+            setTextColor(0xFFF5F1E9.toInt())
+            setHintTextColor(0xFF9EADB8.toInt())
+            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
         }
         val categorySpinner = Spinner(this)
         val folderSpinner = Spinner(this)
-        val addFolder = Button(this).apply { text = "＋ Nuova sottocartella"; isAllCaps = false }
+        fun darkSpinnerAdapter(items: List<String>) = object : ArrayAdapter<String>(
+            this, android.R.layout.simple_spinner_item, items
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
+                TextView(this@MainActivity).apply {
+                    text = getItem(position) ?: ""
+                    textSize = 16f
+                    setTextColor(0xFFF5F1E9.toInt())
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    setBackgroundColor(0xFF263744.toInt())
+                }
+            override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
+                TextView(this@MainActivity).apply {
+                    text = getItem(position) ?: ""
+                    textSize = 16f
+                    setTextColor(0xFFF5F1E9.toInt())
+                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                    setBackgroundColor(0xFF263744.toInt())
+                }
+        }
+        val addFolder = actionButton("＋ Nuova sottocartella") { }
 
         fun refreshFolders(select: String? = null) {
             val category = categorySpinner.selectedItem?.toString() ?: activeCategory
             val list = folders(category)
-            folderSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, list)
+            folderSpinner.adapter = darkSpinnerAdapter(list)
             val preferred = select ?: prefs.getString(lastFolderKey(category), "Generale")
             val index = list.indexOf(preferred)
             folderSpinner.setSelection(if (index >= 0) index else 0)
         }
 
-        categorySpinner.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, listOf("PERSONALE", "LAVORO")
-        )
+        categorySpinner.adapter = darkSpinnerAdapter(listOf("PERSONALE", "LAVORO"))
+        categorySpinner.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
+        folderSpinner.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
         categorySpinner.setSelection(if (activeCategory == "LAVORO") 1 else 0)
         refreshFolders()
         categorySpinner.onItemSelectedListener = SimpleItemSelectedListener { refreshFolders() }
         addFolder.setOnClickListener {
-            val input = EditText(this).apply { hint = "Nome nuova sottocartella" }
+            val input = EditText(this).apply {
+                hint = "Nome nuova sottocartella"
+                setTextColor(0xFFF5F1E9.toInt())
+                setHintTextColor(0xFF9EADB8.toInt())
+            }
             AlertDialog.Builder(this)
                 .setTitle("Nuova sottocartella")
                 .setView(input)
@@ -285,14 +313,33 @@ class MainActivity : ComponentActivity() {
         })
         content.addView(name)
 
+        val dialogTitle = TextView(this).apply {
+            text = "Dai un nome alla foto"
+            textSize = 22f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setTextColor(0xFFF5F1E9.toInt())
+            setPadding(dp(24), dp(18), dp(24), dp(8))
+            setBackgroundColor(0xFF17232C.toInt())
+        }
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Dai un nome alla foto")
+            .setCustomTitle(dialogTitle)
             .setView(content)
             .setCancelable(false)
             .setNegativeButton("ELIMINA", null)
             .setPositiveButton("SALVA", null)
             .create()
         dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(ColorDrawable(0xFF17232C.toInt()))
+            listOf(AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_POSITIVE).forEach { which ->
+                dialog.getButton(which).apply {
+                    setTextColor(0xFFF5F1E9.toInt())
+                    background = android.graphics.drawable.GradientDrawable(
+                        android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                        intArrayOf(0xFF294968.toInt(), 0xFF142B43.toInt())
+                    ).apply { cornerRadius = dp(12).toFloat(); setStroke(dp(1), 0xFF9DB9D2.toInt()) }
+                    backgroundTintList = null
+                }
+            }
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
                 contentResolver.delete(uri, null, null)
                 pendingPhoto = null
