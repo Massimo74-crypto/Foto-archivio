@@ -312,22 +312,15 @@ class MainActivity : ComponentActivity() {
 
     private fun launchCamera() {
         try {
+            prepareArchiveFolders()
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "FA_TEMP_$stamp.jpg")
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FA archivio principale/INBOX/")
-            }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-            if (uri == null) {
-                toast("Non riesco a preparare il file per la fotocamera")
-                showHome()
-                return
-            }
-            pendingPhoto = uri
-            cameraLauncher.launch(uri)
+            val file = File(File(archiveRoot(false), "INBOX"), "FA_TEMP_$stamp.jpg")
+            pendingPhotoFile = file
+            pendingPhoto = archiveFileUri(file)
+            cameraLauncher.launch(pendingPhoto!!)
         } catch (e: Exception) {
-            pendingPhoto?.let { contentResolver.delete(it, null, null) }
+            pendingPhotoFile?.delete()
+            pendingPhotoFile = null
             pendingPhoto = null
             toast("Fotocamera non disponibile: ${e.localizedMessage ?: "errore"}")
             showHome()
@@ -336,22 +329,15 @@ class MainActivity : ComponentActivity() {
 
     private fun launchVideoCamera() {
         try {
+            prepareArchiveFolders()
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, "FA_TEMP_$stamp.mp4")
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/FA archivio principale/INBOX/")
-            }
-            val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-            if (uri == null) {
-                toast("Non riesco a preparare il file per la videocamera")
-                showHome()
-                return
-            }
-            pendingVideo = uri
-            videoLauncher.launch(uri)
+            val file = File(File(archiveRoot(true), "INBOX"), "FA_TEMP_$stamp.mp4")
+            pendingVideoFile = file
+            pendingVideo = archiveFileUri(file)
+            videoLauncher.launch(pendingVideo!!)
         } catch (e: Exception) {
-            pendingVideo?.let { contentResolver.delete(it, null, null) }
+            pendingVideoFile?.delete()
+            pendingVideoFile = null
             pendingVideo = null
             toast("Videocamera non disponibile: ${e.localizedMessage ?: "errore"}")
             showHome()
@@ -423,8 +409,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun mediaDisplayName(uri: Uri): String {
-        var result = "Elemento"
-        contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        var result = uri.lastPathSegment?.substringAfterLast('/') ?: "Elemento"
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) result = cursor.getString(0) ?: result
         }
         return result
@@ -562,8 +548,8 @@ class MainActivity : ComponentActivity() {
             }
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
                 if (!isImported) {
-                    contentResolver.delete(uri, null, null)
-                    if (isVideo) pendingVideo = null else pendingPhoto = null
+                    if (isVideo) { pendingVideoFile?.delete(); pendingVideoFile = null; pendingVideo = null }
+                    else { pendingPhotoFile?.delete(); pendingPhotoFile = null; pendingPhoto = null }
                 }
                 dialog.dismiss()
                 if (isImported) showNextImportedItem()
@@ -586,43 +572,34 @@ class MainActivity : ComponentActivity() {
                     .ifBlank { "Generale" }
                 val extension = ".$sourceExtension"
                 val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(extension)) baseName else "$baseName$extension"
-                val mediaRoot = if (isVideo) "Movies" else "Pictures"
-                val path = "$mediaRoot/FA archivio principale/$category/$folder/"
-                val mimeType = contentResolver.getType(uri) ?: if (isVideo) "video/mp4" else "image/jpeg"
+                val destinationDir = File(archiveRoot(isVideo), "$category/$folder")
+                val destination = File(destinationDir, fileName)
                 prefs.edit().putString(lastFolderKey(category), folder).apply()
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, path)
-                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                }
-                val saved = if (isImported) {
-                    // IMPORTAZIONE SEMPRE PER COPIA: non aggiornare mai la riga MediaStore
-                    // della sorgente. In questo modo DCIM/Camera e FA restano indipendenti.
-                    val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                    val destination = contentResolver.insert(collection, values)
-                    if (destination == null) false else try {
+                val saved = try {
+                    destinationDir.mkdirs()
+                    if (destination.exists()) {
+                        name.error = "Esiste già un file con questo nome"
+                        false
+                    } else if (isImported) {
+                        // Copia fisica: la sorgente in DCIM/Camera o altrove non viene mai modificata.
                         val input = contentResolver.openInputStream(uri)
-                        val output = contentResolver.openOutputStream(destination, "w")
-                        if (input == null || output == null) {
-                            input?.close()
-                            output?.close()
-                            contentResolver.delete(destination, null, null)
-                            false
-                        } else {
-                            input.use { source -> output.use { target -> source.copyTo(target) } }
+                        if (input == null) false else {
+                            input.use { source -> FileOutputStream(destination).use { target -> source.copyTo(target) } }
                             true
                         }
-                    } catch (_: Exception) {
-                        contentResolver.delete(destination, null, null)
-                        false
+                    } else {
+                        val temp = if (isVideo) pendingVideoFile else pendingPhotoFile
+                        temp != null && temp.exists() && temp.renameTo(destination)
                     }
-                } else {
-                    contentResolver.update(uri, values, null, null) > 0
+                } catch (_: Exception) {
+                    destination.delete()
+                    false
                 }
                 if (saved) {
                     activeCategory = category
                     if (!isImported) {
-                        if (isVideo) pendingVideo = null else pendingPhoto = null
+                        if (isVideo) { pendingVideo = null; pendingVideoFile = null }
+                        else { pendingPhoto = null; pendingPhotoFile = null }
                     }
                     dialog.dismiss()
                     toast("${if (isVideo) "Video" else "Foto"} importato/salvato in $category/$folder")
