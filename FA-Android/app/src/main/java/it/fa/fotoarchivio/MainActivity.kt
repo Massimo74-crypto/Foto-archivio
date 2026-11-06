@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private var activeCategory = "PERSONALE"
     private var pendingPhoto: Uri? = null
     private var pendingVideo: Uri? = null
+    private var importQueue: MutableList<Uri> = mutableListOf()
     private val selectedPhotos = linkedSetOf<String>()
     private var explorerCategory = "PERSONALE"
     private var explorerFolder = "Generale"
@@ -57,6 +58,13 @@ class MainActivity : ComponentActivity() {
             pendingVideo = null
             toast("Registrazione annullata")
             showHome()
+        }
+    }
+
+    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (!uris.isNullOrEmpty()) {
+            importQueue = uris.toMutableList()
+            showNextImportedItem()
         }
     }
 
@@ -163,18 +171,16 @@ class MainActivity : ComponentActivity() {
             bottomMargin = dp(12)
         })
 
-        val categories = LinearLayout(this).apply {
+        val captureButtons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
-        categories.addView(actionButton("👤  PERSONALE   ←") {
-            activeCategory = "PERSONALE"
-            chooseCaptureMode()
+        captureButtons.addView(actionButton("📷  SCATTA FOTO") {
+            launchCamera()
         }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { rightMargin = dp(7) })
-        categories.addView(actionButton("💼  LAVORO   ←") {
-            activeCategory = "LAVORO"
-            chooseCaptureMode()
+        captureButtons.addView(actionButton("🎥  REGISTRA VIDEO") {
+            launchVideoCamera()
         }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { leftMargin = dp(7) })
-        root.addView(categories, LinearLayout.LayoutParams(-1, dp(70)).apply {
+        root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(70)).apply {
             bottomMargin = dp(8)
         })
 
@@ -205,16 +211,6 @@ class MainActivity : ComponentActivity() {
         root.addView(bottom, LinearLayout.LayoutParams(-1, dp(48)))
 
         setContentView(root)
-    }
-
-    private fun chooseCaptureMode() {
-        AlertDialog.Builder(this)
-            .setTitle("FA - Nuova acquisizione")
-            .setItems(arrayOf("📷  Scatta una foto", "🎥  Registra un video")) { _, which ->
-                if (which == 0) launchCamera() else launchVideoCamera()
-            }
-            .setNegativeButton("Annulla", null)
-            .show()
     }
 
     private fun launchCamera() {
@@ -282,7 +278,31 @@ class MainActivity : ComponentActivity() {
     private fun safeFolder(value: String): String =
         value.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Generale" }
 
-    private fun showNamingDialog(uri: Uri, isVideo: Boolean = false) {
+    private fun showNextImportedItem() {
+        if (importQueue.isEmpty()) {
+            showFileManager()
+            return
+        }
+        val uri = importQueue.removeAt(0)
+        val mime = contentResolver.getType(uri) ?: ""
+        val isVideo = mime.startsWith("video/")
+        if (!isVideo && !mime.startsWith("image/")) {
+            toast("Formato non supportato: elemento ignorato")
+            showNextImportedItem()
+            return
+        }
+        showNamingDialog(uri, isVideo, true)
+    }
+
+    private fun mediaDisplayName(uri: Uri): String {
+        var result = "Elemento"
+        contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) result = cursor.getString(0) ?: result
+        }
+        return result
+    }
+
+    private fun showNamingDialog(uri: Uri, isVideo: Boolean = false, isImported: Boolean = false) {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(8), dp(22), 0)
@@ -294,8 +314,13 @@ class MainActivity : ComponentActivity() {
             contentDescription = if (isVideo) "Video appena registrato" else "Anteprima della foto appena scattata"
         }
         content.setBackgroundColor(0xFF17232C.toInt())
+        val sourceName = if (isImported) mediaDisplayName(uri) else ""
+        val sourceExtension = sourceName.substringAfterLast('.', if (isVideo) "mp4" else "jpg")
+            .let { it.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "").ifBlank { if (isVideo) "mp4" else "jpg" } }
+        val sourceBaseName = if (isImported) sourceName.substringBeforeLast('.', sourceName) else ""
         val name = EditText(this).apply {
             hint = if (isVideo) "Scrivi il nome del video" else "Scrivi il nome della foto"
+            if (isImported) setText(sourceBaseName)
             isSingleLine = true
             textSize = 18f
             setTextColor(0xFFFFFFFF.toInt())
@@ -412,10 +437,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
-                contentResolver.delete(uri, null, null)
-                if (isVideo) pendingVideo = null else pendingPhoto = null
+                if (!isImported) {
+                    contentResolver.delete(uri, null, null)
+                    if (isVideo) pendingVideo = null else pendingPhoto = null
+                }
                 dialog.dismiss()
-                if (isVideo) launchVideoCamera() else launchCamera()
+                if (isImported) showNextImportedItem()
+                else if (isVideo) launchVideoCamera() else launchCamera()
             }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val baseName = safeFolder(name.text.toString())
@@ -425,25 +453,50 @@ class MainActivity : ComponentActivity() {
                 }
                 val category = categorySpinner.selectedItem.toString()
                 val folder = safeFolder(folderSpinner.selectedItem?.toString() ?: "Generale")
-                val extension = if (isVideo) ".mp4" else ".jpg"
+                val extension = ".$sourceExtension"
                 val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(extension)) baseName else "$baseName$extension"
                 val mediaRoot = if (isVideo) "Movies" else "Pictures"
                 val path = "$mediaRoot/FA/$category/$folder/"
+                val mimeType = contentResolver.getType(uri) ?: if (isVideo) "video/mp4" else "image/jpeg"
                 prefs.edit().putString(lastFolderKey(category), folder).apply()
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                     put(MediaStore.MediaColumns.RELATIVE_PATH, path)
-                    put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 }
-                val updated = contentResolver.update(uri, values, null, null)
-                if (updated > 0) {
-                    activeCategory = category
-                    if (isVideo) pendingVideo = null else pendingPhoto = null
-                    dialog.dismiss()
-                    toast("${if (isVideo) "Video" else "Foto"} salvato in $category/$folder")
-                    if (isVideo) launchVideoCamera() else launchCamera()
+                val saved = if (isImported) {
+                    val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    val destination = contentResolver.insert(collection, values)
+                    if (destination == null) false else try {
+                        val input = contentResolver.openInputStream(uri)
+                        val output = contentResolver.openOutputStream(destination, "w")
+                        if (input == null || output == null) {
+                            input?.close()
+                            output?.close()
+                            contentResolver.delete(destination, null, null)
+                            false
+                        } else {
+                            input.use { source -> output.use { target -> source.copyTo(target) } }
+                            true
+                        }
+                    } catch (_: Exception) {
+                        contentResolver.delete(destination, null, null)
+                        false
+                    }
                 } else {
-                    toast("Non riesco a salvare il nome. Il file è ancora disponibile.")
+                    contentResolver.update(uri, values, null, null) > 0
+                }
+                if (saved) {
+                    activeCategory = category
+                    if (!isImported) {
+                        if (isVideo) pendingVideo = null else pendingPhoto = null
+                    }
+                    dialog.dismiss()
+                    toast("${if (isVideo) "Video" else "Foto"} importato/salvato in $category/$folder")
+                    if (isImported) showNextImportedItem()
+                    else if (isVideo) launchVideoCamera() else launchCamera()
+                } else {
+                    toast("Non riesco a salvare l'elemento. L'originale resta disponibile.")
                 }
             }
             name.requestFocus()
@@ -518,6 +571,9 @@ class MainActivity : ComponentActivity() {
             explorerCategory = "LAVORO"
             showFolderList(explorerCategory)
         }, LinearLayout.LayoutParams(-1, dp(54)))
+        root.addView(actionButton("IMPORTA FOTO E VIDEO DA DISPOSITIVO") {
+            importLauncher.launch(arrayOf("image/*", "video/*"))
+        }, LinearLayout.LayoutParams(-1, dp(52)))
         root.addView(actionButton("GESTISCI SOTTOCARTELLE") { manageFolders() },
             LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("ESPORTA ARCHIVIO ZIP") { exportZip(listPhotos(), "FA-Archivio") },
