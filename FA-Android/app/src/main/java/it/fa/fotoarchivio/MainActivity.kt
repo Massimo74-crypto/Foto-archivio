@@ -964,13 +964,33 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), 0, dp(20), 0)
         }
+        fun darkAdapter(values: List<String>) = object : ArrayAdapter<String>(
+            this, android.R.layout.simple_spinner_item, values
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
+                TextView(this@MainActivity).apply {
+                    text = getItem(position) ?: ""
+                    setTextColor(0xFFF5F1E9.toInt())
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    setBackgroundColor(0xFF263744.toInt())
+                }
+            override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
+                TextView(this@MainActivity).apply {
+                    text = getItem(position) ?: ""
+                    setTextColor(0xFFF5F1E9.toInt())
+                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                    setBackgroundColor(0xFF263744.toInt())
+                }
+        }
         val category = Spinner(this)
-        category.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("PERSONALE", "LAVORO"))
+        category.adapter = darkAdapter(listOf("PERSONALE", "LAVORO"))
         val folder = Spinner(this)
         fun refresh() {
             val values = folders(category.selectedItem.toString())
-            folder.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, values)
+            folder.adapter = darkAdapter(values)
         }
+        category.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
+        folder.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
         category.onItemSelectedListener = SimpleItemSelectedListener { refresh() }
         refresh()
         layout.addView(category)
