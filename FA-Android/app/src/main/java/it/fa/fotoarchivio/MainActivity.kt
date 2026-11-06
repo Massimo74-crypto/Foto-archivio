@@ -497,7 +497,14 @@ class MainActivity : ComponentActivity() {
                     return@setOnClickListener
                 }
                 val category = categorySpinner.selectedItem.toString()
-                val folder = safeFolder(folderSpinner.selectedItem?.toString() ?: "Generale")
+                // Il valore dello spinner può essere un percorso completo:
+                // sanificare ogni segmento separatamente preserva le sottocartelle.
+                val folder = (folderSpinner.selectedItem?.toString() ?: "Generale")
+                    .trim('/')
+                    .split('/')
+                    .filter { it.isNotBlank() }
+                    .joinToString("/") { safeFolder(it) }
+                    .ifBlank { "Generale" }
                 val extension = ".$sourceExtension"
                 val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(extension)) baseName else "$baseName$extension"
                 val mediaRoot = if (isVideo) "Movies" else "Pictures"
@@ -510,23 +517,53 @@ class MainActivity : ComponentActivity() {
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 }
                 val saved = if (isImported) {
-                    val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                    val destination = contentResolver.insert(collection, values)
-                    if (destination == null) false else try {
-                        val input = contentResolver.openInputStream(uri)
-                        val output = contentResolver.openOutputStream(destination, "w")
-                        if (input == null || output == null) {
-                            input?.close()
-                            output?.close()
+                    // Se l'elemento selezionato è già nell'archivio FA, sposta/aggiorna
+                    // la riga MediaStore esistente: non creare una seconda copia.
+                    val sourceUri = try {
+                        if (android.provider.DocumentsContract.isDocumentUri(this, uri) &&
+                            uri.authority == "com.android.providers.media.documents") {
+                            val documentId = android.provider.DocumentsContract.getDocumentId(uri)
+                            val parts = documentId.split(":")
+                            if (parts.size == 2) {
+                                val sourceCollection = if (parts[0] == "video")
+                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                                else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                                Uri.withAppendedPath(sourceCollection, parts[1])
+                            } else uri
+                        } else uri
+                    } catch (_: Exception) { uri }
+                    val sourcePath = try {
+                        contentResolver.query(
+                            sourceUri,
+                            arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
+                            null, null, null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else null
+                        }
+                    } catch (_: Exception) { null }
+                    val alreadyInFa = sourcePath?.startsWith("Pictures/FA/") == true ||
+                        sourcePath?.startsWith("Movies/FA/") == true
+                    if (alreadyInFa) {
+                        contentResolver.update(sourceUri, values, null, null) > 0
+                    } else {
+                        val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                        val destination = contentResolver.insert(collection, values)
+                        if (destination == null) false else try {
+                            val input = contentResolver.openInputStream(uri)
+                            val output = contentResolver.openOutputStream(destination, "w")
+                            if (input == null || output == null) {
+                                input?.close()
+                                output?.close()
+                                contentResolver.delete(destination, null, null)
+                                false
+                            } else {
+                                input.use { source -> output.use { target -> source.copyTo(target) } }
+                                true
+                            }
+                        } catch (_: Exception) {
                             contentResolver.delete(destination, null, null)
                             false
-                        } else {
-                            input.use { source -> output.use { target -> source.copyTo(target) } }
-                            true
                         }
-                    } catch (_: Exception) {
-                        contentResolver.delete(destination, null, null)
-                        false
                     }
                 } else {
                     contentResolver.update(uri, values, null, null) > 0
