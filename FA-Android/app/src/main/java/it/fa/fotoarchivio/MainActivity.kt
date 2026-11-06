@@ -352,6 +352,8 @@ class MainActivity : ComponentActivity() {
 
     // I percorsi sono relativi alla categoria, ad esempio AMMEGA/CARTEGGIATRICE/RECINZIONE.
     private fun folders(category: String): MutableList<String> {
+        // Unisce le cartelle registrate nelle preferenze con quelle realmente presenti
+        // sul telefono: così una cartella fisica non scompare se manca la voce interna.
         val saved = prefs.getStringSet(folderKey(category), setOf("Generale"))?.toMutableSet()
             ?: mutableSetOf("Generale")
         val expanded = mutableSetOf<String>()
@@ -361,6 +363,25 @@ class MainActivity : ComponentActivity() {
             clean.forEach { part ->
                 path = if (path.isEmpty()) safeFolder(part) else path + "/" + safeFolder(part)
                 expanded.add(path)
+            }
+        }
+        listOf(false, true).forEach { isVideo ->
+            val categoryRoot = File(archiveRoot(isVideo), category)
+            if (categoryRoot.exists() && categoryRoot.isDirectory) {
+                categoryRoot.walkTopDown()
+                    .filter { it.isDirectory && it != categoryRoot }
+                    .forEach { directory ->
+                        val relative = directory.relativeTo(categoryRoot).path
+                            .replace(File.separatorChar, '/').trim('/')
+                        if (relative.isNotBlank() && relative != ".FA_TEMP" &&
+                            !relative.startsWith(".FA_TEMP/")) {
+                            var current = ""
+                            relative.split('/').filter { it.isNotBlank() }.forEach { part ->
+                                current = if (current.isEmpty()) part else "$current/$part"
+                                expanded.add(current)
+                            }
+                        }
+                    }
             }
         }
         if (expanded.isEmpty()) expanded.add("Generale")
