@@ -255,7 +255,7 @@ class MainActivity : ComponentActivity() {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, "FA_TEMP_$stamp.jpg")
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FA/INBOX/")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FA archivio principale/INBOX/")
             }
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
@@ -279,7 +279,7 @@ class MainActivity : ComponentActivity() {
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, "FA_TEMP_$stamp.mp4")
                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/FA/INBOX/")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/FA archivio principale/INBOX/")
             }
             val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
@@ -526,7 +526,7 @@ class MainActivity : ComponentActivity() {
                 val extension = ".$sourceExtension"
                 val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(extension)) baseName else "$baseName$extension"
                 val mediaRoot = if (isVideo) "Movies" else "Pictures"
-                val path = "$mediaRoot/FA/$category/$folder/"
+                val path = "$mediaRoot/FA archivio principale/$category/$folder/"
                 val mimeType = contentResolver.getType(uri) ?: if (isVideo) "video/mp4" else "image/jpeg"
                 prefs.edit().putString(lastFolderKey(category), folder).apply()
                 val values = ContentValues().apply {
@@ -594,7 +594,7 @@ class MainActivity : ComponentActivity() {
                 collection,
                 projection,
                 "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} NOT LIKE ?",
-                arrayOf("$root/FA/%", "$root/FA/INBOX/%"),
+                arrayOf("$root/FA archivio principale/%", "$root/FA archivio principale/INBOX/%"),
                 "${MediaStore.MediaColumns.DATE_ADDED} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
@@ -619,11 +619,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isInCategory(path: String, category: String): Boolean =
-        path.startsWith("Pictures/FA/$category/") || path.startsWith("Movies/FA/$category/")
+        path.startsWith("Pictures/FA archivio principale/$category/") || path.startsWith("Movies/FA archivio principale/$category/")
 
     private fun categoryFolderPath(item: PhotoItem, category: String, folder: String): String {
         val root = if (item.isVideo) "Movies" else "Pictures"
-        return "$root/FA/$category/$folder/"
+        return "$root/FA archivio principale/$category/$folder/"
     }
 
     private fun showFileManager() {
@@ -744,11 +744,11 @@ class MainActivity : ComponentActivity() {
         val allItems = listPhotos().filter { isInCategory(it.path, explorerCategory) }
         val exactRelative = current.trim('/')
         val photos = allItems.filter {
-            val relative = it.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+            val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
             relative == exactRelative
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
         val descendantCount = allItems.count {
-            val relative = it.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+            val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
             if (exactRelative.isBlank()) relative.isNotBlank()
             else relative.startsWith(exactRelative + "/")
         }
@@ -765,7 +765,7 @@ class MainActivity : ComponentActivity() {
         children.forEach { child ->
             val fullPath = if (current.isBlank()) child else current + "/" + child
             val count = allItems.count {
-                val relative = it.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+                val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
                 relative == fullPath || relative.startsWith(fullPath + "/")
             }
             val row = LinearLayout(this).apply {
@@ -902,10 +902,10 @@ class MainActivity : ComponentActivity() {
                     }.toSet()
                     saveFolderList(explorerCategory, changed.toList())
                     listPhotos().filter { isInCategory(it.path, explorerCategory) }.forEach { item ->
-                        val relative = item.path.substringAfter("/FA/" + explorerCategory + "/", "").trimEnd('/')
+                        val relative = item.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
                         if (relative == oldPath || relative.startsWith(oldPath + "/")) {
                             val rootName = if (item.isVideo) "Movies" else "Pictures"
-                            val updatedPath = rootName + "/FA/" + explorerCategory + "/" +
+                            val updatedPath = rootName + "/FA archivio principale/" + explorerCategory + "/" +
                                 newPath + relative.removePrefix(oldPath) + "/"
                             contentResolver.update(item.uri, ContentValues().apply {
                                 put(MediaStore.MediaColumns.RELATIVE_PATH, updatedPath)
@@ -925,7 +925,7 @@ class MainActivity : ComponentActivity() {
         val hasMedia = listPhotos().any { item ->
             if (!isInCategory(item.path, explorerCategory)) false
             else {
-                val relative = item.path.substringAfter("/FA/" + explorerCategory, "").trim('/')
+                val relative = item.path.substringAfter("/FA archivio principale/" + explorerCategory, "").trim('/')
                 relative == path || relative.startsWith(path + "/")
             }
         }
@@ -968,10 +968,10 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) { null }
         val isManaged = actualPath?.let {
-            it.startsWith("Pictures/FA/PERSONALE/") ||
-                it.startsWith("Pictures/FA/LAVORO/") ||
-                it.startsWith("Movies/FA/PERSONALE/") ||
-                it.startsWith("Movies/FA/LAVORO/")
+            it.startsWith("Pictures/FA archivio principale/PERSONALE/") ||
+                it.startsWith("Pictures/FA archivio principale/LAVORO/") ||
+                it.startsWith("Movies/FA archivio principale/PERSONALE/") ||
+                it.startsWith("Movies/FA archivio principale/LAVORO/")
         } == true
         if (!isManaged) {
             toast("Cancellazione bloccata: percorso FA non verificato")
@@ -1040,7 +1040,7 @@ class MainActivity : ComponentActivity() {
                 .setItems(labels) { _, index ->
                     val destinationFolder = paths[index]
                     val root = if (photo.isVideo) "Movies" else "Pictures"
-                    val destinationPath = root + "/FA/" + targetCategory + "/" +
+                    val destinationPath = root + "/FA archivio principale/" + targetCategory + "/" +
                         destinationFolder + "/"
                     val values = ContentValues().apply {
                         put(MediaStore.MediaColumns.RELATIVE_PATH, destinationPath)
@@ -1111,7 +1111,7 @@ class MainActivity : ComponentActivity() {
             val zipUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (zipUri == null) { toast("Non riesco a creare il file ZIP"); return }
             val entries = items.map { photo ->
-                Triple(photo.uri, photo.path.substringAfter("/FA/").trimEnd('/'), photo.name)
+                Triple(photo.uri, photo.path.substringAfter("/FA archivio principale/").trimEnd('/'), photo.name)
             }
             FaZipExporter.write(contentResolver, zipUri, entries)
             val share = Intent(Intent.ACTION_SEND).apply {
