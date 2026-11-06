@@ -75,6 +75,18 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = 0xFF05080B.toInt()
         window.decorView.systemUiVisibility = 0
         showHome()
+        askArchiveAtStartup()
+    }
+
+    private fun askArchiveAtStartup() {
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Quale archivio vuoi aprire?")
+            .setItems(arrayOf("👤  PERSONALE", "💼  LAVORO")) { _, which ->
+                activeCategory = if (which == 1) "LAVORO" else "PERSONALE"
+                showHome()
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -84,6 +96,8 @@ class MainActivity : ComponentActivity() {
             hint = hintText
             initialText?.let { setText(it) }
             isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             textSize = 17f
             setTextColor(0xFFFFFFFF.toInt())
             setHintTextColor(0xFFB8C7D2.toInt())
@@ -800,12 +814,17 @@ class MainActivity : ComponentActivity() {
                 setTextColor(0xFFC7B9A7.toInt())
             })
             row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(actionButton("APRI") {
+            row.isClickable = true
+            row.isFocusable = true
+            row.setOnClickListener {
                 explorerFolder = fullPath
                 prefs.edit().putString(lastFolderKey(explorerCategory), fullPath).apply()
                 showExplorerFolder()
-            })
-            row.addView(actionButton("⋮") { folderActions(fullPath) })
+            }
+            row.setOnLongClickListener {
+                folderActions(fullPath)
+                true
+            }
             list.addView(row)
             list.addView(View(this).apply { setBackgroundColor(0xFF3D4B57.toInt()) },
                 LinearLayout.LayoutParams(-1, dp(1)))
@@ -834,15 +853,19 @@ class MainActivity : ComponentActivity() {
                 textSize = 14f
                 setTextColor(0xFFF1E9DD.toInt())
             })
-            details.addView(actionButton("OPZIONI") { showPhotoActions(photo) })
-            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(CheckBox(this).apply {
-                isChecked = selectedPhotos.contains(photo.uri.toString())
-                setOnCheckedChangeListener { _, checked ->
-                    if (checked) selectedPhotos.add(photo.uri.toString())
-                    else selectedPhotos.remove(photo.uri.toString())
-                }
+            details.addView(TextView(this).apply {
+                text = "Tocco breve: apri  •  Tocco lungo: opzioni"
+                textSize = 11f
+                setTextColor(0xFFB9C4CF.toInt())
             })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            row.isClickable = true
+            row.isFocusable = true
+            row.setOnClickListener { openMediaItem(photo) }
+            row.setOnLongClickListener {
+                showPhotoActions(photo)
+                true
+            }
             list.addView(row)
             list.addView(View(this).apply { setBackgroundColor(0xFF3D4B57.toInt()) },
                 LinearLayout.LayoutParams(-1, dp(1)))
@@ -871,10 +894,8 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, dp(42))
         }
-        bottom.addView(actionButton("AZIONI SELEZIONATE") { showBulkPhotoActions() },
-            LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(6) })
         bottom.addView(actionButton("CARTELLE") { showFolderList(explorerCategory) },
-            LinearLayout.LayoutParams(0, dp(50), 1f).apply { leftMargin = dp(6) })
+            LinearLayout.LayoutParams(-1, dp(50)))
         root.addView(bottom)
         setContentView(root)
     }
@@ -951,11 +972,23 @@ class MainActivity : ComponentActivity() {
                 else AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setMessage("Eliminare definitivamente gli elementi selezionati?")
                     .setNegativeButton("Annulla", null)
                     .setPositiveButton("Elimina") { _, _ ->
-                        chosen.forEach { contentResolver.delete(it.uri, null, null) }
+                        chosen.forEach { deleteFaItem(it) }
                         selectedPhotos.clear()
                         showExplorerFolder()
                     }.show()
             }.show()
+    }
+
+    private fun deleteFaItem(photo: PhotoItem): Boolean {
+        val isManaged = photo.path.startsWith("Pictures/FA/PERSONALE/") ||
+            photo.path.startsWith("Pictures/FA/LAVORO/") ||
+            photo.path.startsWith("Movies/FA/PERSONALE/") ||
+            photo.path.startsWith("Movies/FA/LAVORO/")
+        if (!isManaged) {
+            toast("Operazione bloccata: il file non risulta una copia nell'archivio FA")
+            return false
+        }
+        return contentResolver.delete(photo.uri, null, null) > 0
     }
 
     private fun showPhotoActions(photo: PhotoItem) {
@@ -970,8 +1003,8 @@ class MainActivity : ComponentActivity() {
                         .setMessage("Eliminare definitivamente questo elemento?")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Elimina") { _, _ ->
-                            contentResolver.delete(photo.uri, null, null)
-                            showFileManager()
+                            deleteFaItem(photo)
+                            showExplorerFolder()
                         }.show()
                 }
             }.show()
