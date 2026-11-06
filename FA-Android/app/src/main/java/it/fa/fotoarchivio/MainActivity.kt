@@ -324,7 +324,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun safeFolder(value: String): String =
-        value.trim().replace(Regex("[\\\\/:*?""<>|]"), "_").ifBlank { "Generale" }
+        value.trim().replace(Regex("[\\\\/:*?\\"<>|]"), "_").ifBlank { "Generale" }
 
     private fun showNextImportedItem() {
         if (importQueue.isEmpty()) {
@@ -988,49 +988,23 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun manageFolders() {
-        val entries = mutableListOf<String>()
-        listOf("PERSONALE", "LAVORO").forEach { cat ->
-            folders(cat).forEach { entries.add("$cat  /  $it") }
+        val choices = mutableListOf<Pair<String, String>>()
+        listOf("PERSONALE", "LAVORO").forEach { category ->
+            folders(category).forEach { folder -> choices.add(category to folder) }
         }
+        if (choices.isEmpty()) {
+            toast("Non ci sono cartelle da gestire")
+            return
+        }
+        val labels = choices.map { it.first + "  /  " + it.second }.toTypedArray()
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Sottocartelle")
-            .setItems(entries.toTypedArray()) { _, index ->
-                val selected = entries[index]
-                val category = selected.substringBefore("  /  ")
-                val oldName = selected.substringAfter("  /  ")
-                val input = darkEditText(initialText = oldName).apply { selectAll() }
-                AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-                    .setTitle("Rinomina sottocartella")
-                    .setView(input)
-                    .setNegativeButton("Annulla", null)
-                    .setPositiveButton("Rinomina") { _, _ ->
-                        val newName = safeFolder(input.text.toString())
-                        if (newName != oldName) {
-                            listOf(
-                                "Pictures" to MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                "Movies" to MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                            ).forEach { (root, collection) ->
-                                val values = ContentValues().apply {
-                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "$root/FA/$category/$newName/")
-                                }
-                                contentResolver.update(
-                                    collection,
-                                    values,
-                                    "${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
-                                    arrayOf("$root/FA/$category/$oldName/")
-                                )
-                            }
-                            val updated = folders(category).filterNot { it == oldName } + newName
-                            saveFolderList(category, updated)
-                        }
-                        showFileManager()
-                    }.setNeutralButton("Elimina lista") { _, _ ->
-                        val hasPhotos = listPhotos().any { isInCategory(it.path, category) && it.path.trimEnd('/').endsWith("/$category/$oldName") }
-                        if (hasPhotos) toast("Sottocartella non vuota: sposta o elimina prima foto e video")
-                        else saveFolderList(category, folders(category).filterNot { it == oldName })
-                        showFileManager()
-                    }.show()
-            }.setNegativeButton("Chiudi", null).show()
+            .setTitle("Gestisci cartelle")
+            .setItems(labels) { _, index ->
+                explorerCategory = choices[index].first
+                folderActions(choices[index].second)
+            }
+            .setNegativeButton("Chiudi", null)
+            .show()
     }
 
     private fun showExportOptions() {
