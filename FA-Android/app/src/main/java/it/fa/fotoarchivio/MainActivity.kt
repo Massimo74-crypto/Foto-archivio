@@ -100,7 +100,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showHome() {
         val root = page("")
-        root.setPadding(dp(18), dp(12), dp(18), dp(14))
+        root.setPadding(dp(18), dp(12), dp(18), dp(48))
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -230,12 +230,22 @@ class MainActivity : ComponentActivity() {
         }
         content.setBackgroundColor(0xFF17232C.toInt())
         val name = EditText(this).apply {
-            hint = "Nome della foto"
+            hint = "Scrivi il nome della foto"
             isSingleLine = true
             textSize = 18f
-            setTextColor(0xFFF5F1E9.toInt())
-            setHintTextColor(0xFF9EADB8.toInt())
-            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+            setHintTextColor(0xFFB8C7D2.toInt())
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            minHeight = dp(52)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF263744.toInt())
+                cornerRadius = dp(9).toFloat()
+                setStroke(dp(1), 0xFF9DB9D2.toInt())
+            }
+            backgroundTintList = null
+            highlightColor = 0xFF496F91.toInt()
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         val categorySpinner = Spinner(this)
         val folderSpinner = Spinner(this)
