@@ -135,7 +135,8 @@ class MainActivity : ComponentActivity() {
             root.mkdirs()
             val marker = File(root, ".nomedia")
             if (!marker.exists()) marker.createNewFile()
-            listOf("PERSONALE", "LAVORO", "INBOX").forEach { File(root, it).mkdirs() }
+            listOf("PERSONALE", "LAVORO", ".FA_TEMP").forEach { File(root, it).mkdirs() }
+            listOf("PERSONALE", "LAVORO").forEach { File(root, "$it/Generale").mkdirs() }
         }
     }
 
@@ -316,7 +317,7 @@ class MainActivity : ComponentActivity() {
         try {
             prepareArchiveFolders()
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file = File(File(archiveRoot(false), "INBOX"), "FA_TEMP_$stamp.jpg")
+            val file = File(File(archiveRoot(false), ".FA_TEMP"), "FA_TEMP_$stamp.jpg")
             pendingPhotoFile = file
             pendingPhoto = archiveFileUri(file)
             cameraLauncher.launch(pendingPhoto!!)
@@ -333,7 +334,7 @@ class MainActivity : ComponentActivity() {
         try {
             prepareArchiveFolders()
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file = File(File(archiveRoot(true), "INBOX"), "FA_TEMP_$stamp.mp4")
+            val file = File(File(archiveRoot(true), ".FA_TEMP"), "FA_TEMP_$stamp.mp4")
             pendingVideoFile = file
             pendingVideo = archiveFileUri(file)
             videoLauncher.launch(pendingVideo!!)
@@ -630,7 +631,7 @@ class MainActivity : ComponentActivity() {
             val root = archiveRoot(isVideo)
             if (!root.exists()) return@forEach
             root.walkTopDown()
-                .filter { it.isFile && it.name != ".nomedia" && !it.relativeTo(root).path.replace(File.separatorChar, '/').startsWith("INBOX/") }
+                .filter { it.isFile && it.name != ".nomedia" && !it.relativeTo(root).path.replace(File.separatorChar, '/').startsWith(".FA_TEMP/") }
                 .forEach { file ->
                     val rootName = if (isVideo) "Movies" else "Pictures"
                     val relative = file.relativeTo(Environment.getExternalStorageDirectory()).path.replace(File.separatorChar, '/')
