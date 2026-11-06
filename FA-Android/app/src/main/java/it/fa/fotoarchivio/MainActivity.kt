@@ -568,11 +568,12 @@ class MainActivity : ComponentActivity() {
                     } catch (_: Exception) { null }
                     // Un percorso esterno esplicito ha sempre la precedenza:
                     // DCIM/Camera non può mai essere scambiata per un file già in FA.
-                    val sourcePath = directSourcePath ?: resolvedSourcePath
                     val expectedRoot = if (isVideo) "Movies/FA/" else "Pictures/FA/"
-                    val alreadyInFa = sourcePath?.startsWith(expectedRoot) == true
-                    val sourceUri = if (directSourcePath?.startsWith(expectedRoot) == true)
-                        uri else resolvedSourceUri
+                    // Aggiorniamo in-place SOLO se l'URI originale dichiara direttamente
+                    // un percorso FA. Se il percorso diretto non è verificabile, copiamo:
+                    // mai rischiare di spostare o riutilizzare l'originale di DCIM/Camera.
+                    val alreadyInFa = directSourcePath?.startsWith(expectedRoot) == true
+                    val sourceUri = if (alreadyInFa) uri else uri
                     if (alreadyInFa) {
                         contentResolver.update(sourceUri, values, null, null) > 0
                     } else {
