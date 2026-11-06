@@ -606,7 +606,8 @@ class MainActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(-1, -2))
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, dp(18))
+            // Solleva i pulsanti dalla barra di navigazione inferiore Motorola.
+            setPadding(0, 0, 0, dp(42))
         }
         bottom.addView(actionButton("AZIONI SELEZIONATE") { showBulkPhotoActions() },
             LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(6) })
