@@ -533,30 +533,46 @@ class MainActivity : ComponentActivity() {
                 val saved = if (isImported) {
                     // Se l'elemento selezionato è già nell'archivio FA, sposta/aggiorna
                     // la riga MediaStore esistente: non creare una seconda copia.
-                    val sourceUri = try {
-                        if (android.provider.DocumentsContract.isDocumentUri(this, uri) &&
-                            uri.authority == "com.android.providers.media.documents") {
-                            val documentId = android.provider.DocumentsContract.getDocumentId(uri)
-                            val parts = documentId.split(":")
-                            if (parts.size == 2) {
-                                val sourceCollection = if (parts[0] == "video")
-                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                                else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                                Uri.withAppendedPath(sourceCollection, parts[1])
-                            } else uri
-                        } else uri
-                    } catch (_: Exception) { uri }
-                    val sourcePath = try {
+                    // Prima interroghiamo direttamente l'URI ricevuto dal selettore.
+                    // Se indica DCIM/Camera o un'altra cartella esterna, deve essere COPIATO.
+                    val directSourcePath = try {
                         contentResolver.query(
-                            sourceUri,
+                            uri,
                             arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
                             null, null, null
                         )?.use { cursor ->
                             if (cursor.moveToFirst()) cursor.getString(0) else null
                         }
                     } catch (_: Exception) { null }
-                    val alreadyInFa = sourcePath?.startsWith("Pictures/FA/") == true ||
-                        sourcePath?.startsWith("Movies/FA/") == true
+                    val resolvedSourceUri = try {
+                        if (android.provider.DocumentsContract.isDocumentUri(this, uri) &&
+                            uri.authority == "com.android.providers.media.documents") {
+                            val documentId = android.provider.DocumentsContract.getDocumentId(uri)
+                            val parts = documentId.split(":")
+                            if (parts.size == 2) {
+                                val sourceCollection = if (parts[0].startsWith("video"))
+                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                                else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                                Uri.withAppendedPath(sourceCollection, parts[1])
+                            } else uri
+                        } else uri
+                    } catch (_: Exception) { uri }
+                    val resolvedSourcePath = try {
+                        contentResolver.query(
+                            resolvedSourceUri,
+                            arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
+                            null, null, null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else null
+                        }
+                    } catch (_: Exception) { null }
+                    // Un percorso esterno esplicito ha sempre la precedenza:
+                    // DCIM/Camera non può mai essere scambiata per un file già in FA.
+                    val sourcePath = directSourcePath ?: resolvedSourcePath
+                    val expectedRoot = if (isVideo) "Movies/FA/" else "Pictures/FA/"
+                    val alreadyInFa = sourcePath?.startsWith(expectedRoot) == true
+                    val sourceUri = if (directSourcePath?.startsWith(expectedRoot) == true)
+                        uri else resolvedSourceUri
                     if (alreadyInFa) {
                         contentResolver.update(sourceUri, values, null, null) > 0
                     } else {
