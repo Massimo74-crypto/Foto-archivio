@@ -54,7 +54,8 @@ class MainActivity : ComponentActivity() {
         val uri = pendingPhoto
         if (ok && uri != null) showNamingDialog(uri, false)
         else {
-            uri?.let { contentResolver.delete(it, null, null) }
+            pendingPhotoFile?.delete()
+            pendingPhotoFile = null
             pendingPhoto = null
             toast("Scatto annullato")
             showHome()
@@ -65,7 +66,8 @@ class MainActivity : ComponentActivity() {
         val uri = pendingVideo
         if (ok && uri != null) showNamingDialog(uri, true)
         else {
-            uri?.let { contentResolver.delete(it, null, null) }
+            pendingVideoFile?.delete()
+            pendingVideoFile = null
             pendingVideo = null
             toast("Registrazione annullata")
             showHome()
@@ -633,7 +635,7 @@ class MainActivity : ComponentActivity() {
                     if (relative.startsWith("$rootName/FA archivio principale/PERSONALE/") ||
                         relative.startsWith("$rootName/FA archivio principale/LAVORO/")) {
                         try {
-                            result.add(PhotoItem(file, archiveFileUri(file), file.name, relative, isVideo))
+                            result.add(PhotoItem(file, archiveFileUri(file), file.name, "/$relative", isVideo))
                         } catch (_: Exception) { }
                     }
                 }
@@ -642,7 +644,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isInCategory(path: String, category: String): Boolean =
-        path.startsWith("Pictures/FA archivio principale/$category/") || path.startsWith("Movies/FA archivio principale/$category/")
+        path.trimStart('/').startsWith("Pictures/FA archivio principale/$category/") || path.trimStart('/').startsWith("Movies/FA archivio principale/$category/")
 
     private fun categoryFolderPath(item: PhotoItem, category: String, folder: String): String {
         val root = if (item.isVideo) "Movies" else "Pictures"
@@ -924,17 +926,16 @@ class MainActivity : ComponentActivity() {
                             newPath + value.removePrefix(oldPath) else value
                     }.toSet()
                     saveFolderList(explorerCategory, changed.toList())
-                    listPhotos().filter { isInCategory(it.path, explorerCategory) }.forEach { item ->
-                        val relative = item.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
-                        if (relative == oldPath || relative.startsWith(oldPath + "/")) {
-                            val rootName = if (item.isVideo) "Movies" else "Pictures"
-                            val updatedPath = rootName + "/FA archivio principale/" + explorerCategory + "/" +
-                                newPath + relative.removePrefix(oldPath) + "/"
-                            contentResolver.update(item.uri, ContentValues().apply {
-                                put(MediaStore.MediaColumns.RELATIVE_PATH, updatedPath)
-                            }, null, null)
+                    var renameOk = true
+                    listOf(false, true).forEach { isVideo ->
+                        val oldDir = File(archiveRoot(isVideo), "$explorerCategory/$oldPath")
+                        if (oldDir.exists()) {
+                            val newDir = File(archiveRoot(isVideo), "$explorerCategory/$newPath")
+                            newDir.parentFile?.mkdirs()
+                            if (newDir.exists() || !oldDir.renameTo(newDir)) renameOk = false
                         }
                     }
+                    if (!renameOk) toast("Una o più cartelle non sono state rinominate")
                     if (explorerFolder == oldPath || explorerFolder.startsWith(oldPath + "/"))
                         explorerFolder = newPath + explorerFolder.removePrefix(oldPath)
                     prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
