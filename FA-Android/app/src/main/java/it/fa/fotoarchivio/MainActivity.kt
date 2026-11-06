@@ -388,6 +388,8 @@ class MainActivity : ComponentActivity() {
             all.add(current)
         }
         saveFolderList(category, all.toList())
+        prepareArchiveFolders()
+        listOf(false, true).forEach { isVideo -> File(archiveRoot(isVideo), "$category/$full").mkdirs() }
         return full
     }
 
@@ -677,7 +679,7 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("COLLEGA AL PC VIA USB") {
             AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
-                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA e i video in Movies → FA: copia PERSONALE e LAVORO da entrambe le posizioni.")
+                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA archivio principale e i video in Movies → FA archivio principale: copia PERSONALE e LAVORO da entrambe le posizioni.")
                 .setPositiveButton("OK", null).show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("INDIETRO") { showHome() }, LinearLayout.LayoutParams(-1, dp(48)))
@@ -957,6 +959,10 @@ class MainActivity : ComponentActivity() {
             toast("Cartella non vuota: elimina prima il contenuto e le sottocartelle")
             return
         }
+        listOf(false, true).forEach { isVideo ->
+            val emptyDir = File(archiveRoot(isVideo), "$explorerCategory/$path")
+            if (emptyDir.exists()) emptyDir.delete()
+        }
         saveFolderList(explorerCategory, folders(explorerCategory).filterNot {
             it == path || it.startsWith(path + "/")
         })
@@ -1103,7 +1109,7 @@ class MainActivity : ComponentActivity() {
                     1 -> exportZip(all.filter { isInCategory(it.path, "PERSONALE") }, "FA-PERSONALE")
                     2 -> exportZip(all.filter { isInCategory(it.path, "LAVORO") }, "FA-LAVORO")
                     3 -> AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
-                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA e i video in Movies → FA; copia le cartelle PERSONALE e LAVORO da entrambe le posizioni.")
+                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA archivio principale e i video in Movies → FA archivio principale; copia PERSONALE e LAVORO da entrambe le posizioni.")
                         .setPositiveButton("OK", null).show()
                 }
             }.show()
