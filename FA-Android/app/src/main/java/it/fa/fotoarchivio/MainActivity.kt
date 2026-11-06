@@ -58,6 +58,25 @@ class MainActivity : ComponentActivity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    private fun darkEditText(hintText: String = "", initialText: String? = null): EditText =
+        EditText(this).apply {
+            hint = hintText
+            initialText?.let { setText(it) }
+            isSingleLine = true
+            textSize = 17f
+            setTextColor(0xFFFFFFFF.toInt())
+            setHintTextColor(0xFFB8C7D2.toInt())
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            minHeight = dp(52)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF263744.toInt())
+                cornerRadius = dp(9).toFloat()
+                setStroke(dp(1), 0xFF9DB9D2.toInt())
+            }
+            backgroundTintList = null
+            highlightColor = 0xFF496F91.toInt()
+        }
+
     private fun page(title: String): LinearLayout {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -287,11 +306,7 @@ class MainActivity : ComponentActivity() {
         refreshFolders()
         categorySpinner.onItemSelectedListener = SimpleItemSelectedListener { refreshFolders() }
         addFolder.setOnClickListener {
-            val input = EditText(this).apply {
-                hint = "Nome nuova sottocartella"
-                setTextColor(0xFFF5F1E9.toInt())
-                setHintTextColor(0xFF9EADB8.toInt())
-            }
+            val input = darkEditText("Nome nuova sottocartella")
             AlertDialog.Builder(this)
                 .setTitle("Nuova sottocartella")
                 .setView(input)
@@ -473,7 +488,7 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 0, 0, dp(12))
         })
         root.addView(actionButton("＋ NUOVA CARTELLA") {
-            val input = EditText(this).apply { hint = "Nome nuova cartella" }
+            val input = darkEditText("Nome nuova cartella")
             AlertDialog.Builder(this).setTitle("Crea cartella").setView(input)
                 .setNegativeButton("Annulla", null)
                 .setPositiveButton("Crea") { _, _ ->
@@ -578,9 +593,9 @@ class MainActivity : ComponentActivity() {
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(ImageView(this).apply {
-            setImageResource(R.drawable.fa_launcher_icon_image)
+            setImageResource(R.drawable.fa_home_image)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Album fotografico vintage con macchina fotografica"
+            contentDescription = "Fotocamera vintage su album fotografico"
         }, LinearLayout.LayoutParams(dp(278), dp(278)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
         })
@@ -638,10 +653,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renamePhoto(photo: PhotoItem) {
-        val input = EditText(this).apply {
-            setText(photo.name.substringBeforeLast('.'))
-            selectAll()
-        }
+        val input = darkEditText(initialText = photo.name.substringBeforeLast('.')).apply { selectAll() }
         AlertDialog.Builder(this)
             .setTitle("Rinomina foto")
             .setView(input)
@@ -694,7 +706,7 @@ class MainActivity : ComponentActivity() {
                 val selected = entries[index]
                 val category = selected.substringBefore("  /  ")
                 val oldName = selected.substringAfter("  /  ")
-                val input = EditText(this).apply { setText(oldName); selectAll() }
+                val input = darkEditText(initialText = oldName).apply { selectAll() }
                 AlertDialog.Builder(this)
                     .setTitle("Rinomina sottocartella")
                     .setView(input)
