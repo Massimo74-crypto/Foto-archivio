@@ -31,6 +31,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private var activeCategory = "PERSONALE"
     private var pendingPhoto: Uri? = null
+    private var pendingVideo: Uri? = null
     private val selectedPhotos = linkedSetOf<String>()
     private var explorerCategory = "PERSONALE"
     private var explorerFolder = "Generale"
@@ -39,11 +40,22 @@ class MainActivity : ComponentActivity() {
 
     private val cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val uri = pendingPhoto
-        if (ok && uri != null) showNamingDialog(uri)
+        if (ok && uri != null) showNamingDialog(uri, false)
         else {
             uri?.let { contentResolver.delete(it, null, null) }
             pendingPhoto = null
             toast("Scatto annullato")
+            showHome()
+        }
+    }
+
+    private val videoLauncher = registerForActivityResult(ActivityResultContracts.CaptureVideo()) { ok ->
+        val uri = pendingVideo
+        if (ok && uri != null) showNamingDialog(uri, true)
+        else {
+            uri?.let { contentResolver.delete(it, null, null) }
+            pendingVideo = null
+            toast("Registrazione annullata")
             showHome()
         }
     }
@@ -156,11 +168,11 @@ class MainActivity : ComponentActivity() {
         }
         categories.addView(actionButton("👤  PERSONALE   ←") {
             activeCategory = "PERSONALE"
-            launchCamera()
+            chooseCaptureMode()
         }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { rightMargin = dp(7) })
         categories.addView(actionButton("💼  LAVORO   ←") {
             activeCategory = "LAVORO"
-            launchCamera()
+            chooseCaptureMode()
         }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { leftMargin = dp(7) })
         root.addView(categories, LinearLayout.LayoutParams(-1, dp(70)).apply {
             bottomMargin = dp(8)
@@ -195,6 +207,16 @@ class MainActivity : ComponentActivity() {
         setContentView(root)
     }
 
+    private fun chooseCaptureMode() {
+        AlertDialog.Builder(this)
+            .setTitle("FA - Nuova acquisizione")
+            .setItems(arrayOf("📷  Scatta una foto", "🎥  Registra un video")) { _, which ->
+                if (which == 0) launchCamera() else launchVideoCamera()
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
     private fun launchCamera() {
         try {
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -219,6 +241,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun launchVideoCamera() {
+        try {
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, "FA_TEMP_$stamp.mp4")
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/FA/INBOX/")
+            }
+            val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            if (uri == null) {
+                toast("Non riesco a preparare il file per la videocamera")
+                showHome()
+                return
+            }
+            pendingVideo = uri
+            videoLauncher.launch(uri)
+        } catch (e: Exception) {
+            pendingVideo?.let { contentResolver.delete(it, null, null) }
+            pendingVideo = null
+            toast("Videocamera non disponibile: ${e.localizedMessage ?: "errore"}")
+            showHome()
+        }
+    }
+
     private fun folderKey(category: String) = "folders_$category"
     private fun lastFolderKey(category: String) = "last_folder_$category"
 
@@ -236,20 +282,20 @@ class MainActivity : ComponentActivity() {
     private fun safeFolder(value: String): String =
         value.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Generale" }
 
-    private fun showNamingDialog(uri: Uri) {
+    private fun showNamingDialog(uri: Uri, isVideo: Boolean = false) {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(8), dp(22), 0)
         }
         val preview = ImageView(this).apply {
-            setImageURI(uri)
-            scaleType = ImageView.ScaleType.CENTER_CROP
+            if (isVideo) setImageResource(android.R.drawable.ic_media_play) else setImageURI(uri)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
             adjustViewBounds = true
-            contentDescription = "Anteprima della foto appena scattata"
+            contentDescription = if (isVideo) "Video appena registrato" else "Anteprima della foto appena scattata"
         }
         content.setBackgroundColor(0xFF17232C.toInt())
         val name = EditText(this).apply {
-            hint = "Scrivi il nome della foto"
+            hint = if (isVideo) "Scrivi il nome del video" else "Scrivi il nome della foto"
             isSingleLine = true
             textSize = 18f
             setTextColor(0xFFFFFFFF.toInt())
@@ -331,7 +377,7 @@ class MainActivity : ComponentActivity() {
         content.addView(folderSpinner)
         content.addView(addFolder)
         content.addView(TextView(this).apply {
-            text = "NOME FOTO"
+            text = if (isVideo) "NOME VIDEO" else "NOME FOTO"
             textSize = 12f
             setTextColor(0xFFB9C4CF.toInt())
             setPadding(0, dp(12), 0, 0)
@@ -339,7 +385,7 @@ class MainActivity : ComponentActivity() {
         content.addView(name)
 
         val dialogTitle = TextView(this).apply {
-            text = "Dai un nome alla foto"
+            text = if (isVideo) "Dai un nome al video" else "Dai un nome alla foto"
             textSize = 22f
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             setTextColor(0xFFF5F1E9.toInt())
@@ -367,9 +413,9 @@ class MainActivity : ComponentActivity() {
             }
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
                 contentResolver.delete(uri, null, null)
-                pendingPhoto = null
+                if (isVideo) pendingVideo = null else pendingPhoto = null
                 dialog.dismiss()
-                launchCamera()
+                if (isVideo) launchVideoCamera() else launchCamera()
             }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val baseName = safeFolder(name.text.toString())
@@ -379,23 +425,25 @@ class MainActivity : ComponentActivity() {
                 }
                 val category = categorySpinner.selectedItem.toString()
                 val folder = safeFolder(folderSpinner.selectedItem?.toString() ?: "Generale")
-                val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(".jpg")) baseName else "$baseName.jpg"
-                val path = "Pictures/FA/$category/$folder/"
+                val extension = if (isVideo) ".mp4" else ".jpg"
+                val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(extension)) baseName else "$baseName$extension"
+                val mediaRoot = if (isVideo) "Movies" else "Pictures"
+                val path = "$mediaRoot/FA/$category/$folder/"
                 prefs.edit().putString(lastFolderKey(category), folder).apply()
                 val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Images.Media.RELATIVE_PATH, path)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, path)
+                    put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
                 }
                 val updated = contentResolver.update(uri, values, null, null)
                 if (updated > 0) {
                     activeCategory = category
-                    pendingPhoto = null
+                    if (isVideo) pendingVideo = null else pendingPhoto = null
                     dialog.dismiss()
-                    toast("Foto salvata in $category/$folder")
-                    launchCamera()
+                    toast("${if (isVideo) "Video" else "Foto"} salvato in $category/$folder")
+                    if (isVideo) launchVideoCamera() else launchCamera()
                 } else {
-                    toast("Non riesco a salvare il nome. La foto è ancora disponibile.")
+                    toast("Non riesco a salvare il nome. Il file è ancora disponibile.")
                 }
             }
             name.requestFocus()
@@ -407,37 +455,50 @@ class MainActivity : ComponentActivity() {
         dialog.show()
     }
 
-    private data class PhotoItem(val uri: Uri, val name: String, val path: String)
+    private data class PhotoItem(val uri: Uri, val name: String, val path: String, val isVideo: Boolean = false)
 
     private fun listPhotos(): List<PhotoItem> {
         val result = mutableListOf<PhotoItem>()
         val projection = arrayOf(
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.RELATIVE_PATH
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH
         )
-        contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?",
-            arrayOf("Pictures/FA/%"),
-            "${MediaStore.Images.Media.DATE_ADDED} DESC"
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-            val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idCol)
-                result.add(
-                    PhotoItem(
-                        Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString()),
-                        cursor.getString(nameCol) ?: "Foto",
-                        cursor.getString(pathCol) ?: ""
+        fun collect(collection: Uri, isVideo: Boolean, root: String) {
+            contentResolver.query(
+                collection,
+                projection,
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+                arrayOf("$root/FA/%"),
+                "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val pathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    result.add(
+                        PhotoItem(
+                            Uri.withAppendedPath(collection, id.toString()),
+                            cursor.getString(nameCol) ?: if (isVideo) "Video" else "Foto",
+                            cursor.getString(pathCol) ?: "",
+                            isVideo
+                        )
                     )
-                )
+                }
             }
         }
+        collect(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, false, "Pictures")
+        collect(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, "Movies")
         return result
+    }
+
+    private fun isInCategory(path: String, category: String): Boolean =
+        path.startsWith("Pictures/FA/$category/") || path.startsWith("Movies/FA/$category/")
+
+    private fun categoryFolderPath(item: PhotoItem, category: String, folder: String): String {
+        val root = if (item.isVideo) "Movies" else "Pictures"
+        return "$root/FA/$category/$folder/"
     }
 
     private fun showFileManager() {
@@ -468,7 +529,7 @@ class MainActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("INDIETRO") { showHome() }, LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(TextView(this).apply {
-            text = "Pictures/FA  •  ${listPhotos().size} foto archiviate"
+            text = "FA  •  ${listPhotos().size} elementi archiviati"
             textSize = 13f
             setTextColor(0xFFB9C4CF.toInt())
             setPadding(0, dp(12), 0, 0)
@@ -500,11 +561,11 @@ class MainActivity : ComponentActivity() {
                     showExplorerFolder()
                 }.show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
-        val allPhotos = listPhotos().filter { it.path.startsWith("Pictures/FA/$category/") }
+        val allPhotos = listPhotos().filter { isInCategory(it.path, category) }
         val scroll = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         folders(category).forEach { folder ->
-            val count = allPhotos.count { it.path.trimEnd('/') == "Pictures/FA/$category/$folder" }
+            val count = allPhotos.count { it.path.trimEnd('/').endsWith("/$category/$folder") }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -545,10 +606,11 @@ class MainActivity : ComponentActivity() {
             setPadding(0, dp(8), 0, dp(8))
         })
         val photos = listPhotos().filter {
-            it.path.trimEnd('/') == "Pictures/FA/$explorerCategory/$explorerFolder"
+            isInCategory(it.path, explorerCategory) &&
+                it.path.trimEnd('/').endsWith("/$explorerCategory/$explorerFolder")
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
         root.addView(TextView(this).apply {
-            text = "${photos.size} foto  •  ${selectedPhotos.size} selezionate"
+            text = "${photos.count { !it.isVideo }} foto  •  ${photos.count { it.isVideo }} video  •  ${selectedPhotos.size} selezionati"
             textSize = 13f
             setPadding(0, dp(6), 0, dp(6))
         })
@@ -561,8 +623,14 @@ class MainActivity : ComponentActivity() {
                 setPadding(0, dp(6), 0, dp(6))
             }
             val thumb = ImageView(this).apply {
-                setImageURI(photo.uri)
-                scaleType = ImageView.ScaleType.CENTER_CROP
+                if (photo.isVideo) {
+                    setImageResource(android.R.drawable.ic_media_play)
+                    setBackgroundColor(0xFF263744.toInt())
+                    scaleType = ImageView.ScaleType.CENTER
+                } else {
+                    setImageURI(photo.uri)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                }
                 contentDescription = photo.name
             }
             row.addView(thumb, LinearLayout.LayoutParams(dp(66), dp(66)))
@@ -619,11 +687,11 @@ class MainActivity : ComponentActivity() {
 
     private fun showBulkPhotoActions() {
         val chosen = listPhotos().filter { selectedPhotos.contains(it.uri.toString()) }
-        if (chosen.isEmpty()) { toast("Seleziona prima una o più foto"); return }
+        if (chosen.isEmpty()) { toast("Seleziona prima uno o più elementi"); return }
         AlertDialog.Builder(this).setTitle("${chosen.size} foto selezionate")
             .setItems(arrayOf("Esporta selezione in ZIP", "Elimina selezione")) { _, which ->
                 if (which == 0) exportZip(chosen, "FA-Selezione")
-                else AlertDialog.Builder(this).setMessage("Eliminare definitivamente le foto selezionate?")
+                else AlertDialog.Builder(this).setMessage("Eliminare definitivamente gli elementi selezionati?")
                     .setNegativeButton("Annulla", null)
                     .setPositiveButton("Elimina") { _, _ ->
                         chosen.forEach { contentResolver.delete(it.uri, null, null) }
@@ -641,7 +709,7 @@ class MainActivity : ComponentActivity() {
                     0 -> renamePhoto(photo)
                     1 -> movePhoto(photo)
                     2 -> AlertDialog.Builder(this)
-                        .setMessage("Eliminare definitivamente questa foto?")
+                        .setMessage("Eliminare definitivamente questo elemento?")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Elimina") { _, _ ->
                             contentResolver.delete(photo.uri, null, null)
@@ -659,8 +727,9 @@ class MainActivity : ComponentActivity() {
             .setNegativeButton("Annulla", null)
             .setPositiveButton("Salva") { _, _ ->
                 val base = safeFolder(input.text.toString())
-                val file = if (base.lowercase(Locale.ROOT).endsWith(".jpg")) base else "$base.jpg"
-                val values = ContentValues().apply { put(MediaStore.Images.Media.DISPLAY_NAME, file) }
+                val extension = if (photo.isVideo) ".mp4" else ".jpg"
+                val file = if (base.lowercase(Locale.ROOT).endsWith(extension)) base else "$base$extension"
+                val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, file) }
                 contentResolver.update(photo.uri, values, null, null)
                 showFileManager()
             }.show()
@@ -687,8 +756,8 @@ class MainActivity : ComponentActivity() {
             .setView(layout)
             .setNegativeButton("Annulla", null)
             .setPositiveButton("Sposta") { _, _ ->
-                val path = "Pictures/FA/${category.selectedItem}/${folder.selectedItem}/"
-                val values = ContentValues().apply { put(MediaStore.Images.Media.RELATIVE_PATH, path) }
+                val path = categoryFolderPath(photo, category.selectedItem.toString(), folder.selectedItem.toString())
+                val values = ContentValues().apply { put(MediaStore.MediaColumns.RELATIVE_PATH, path) }
                 contentResolver.update(photo.uri, values, null, null)
                 showFileManager()
             }.show()
@@ -713,22 +782,27 @@ class MainActivity : ComponentActivity() {
                     .setPositiveButton("Rinomina") { _, _ ->
                         val newName = safeFolder(input.text.toString())
                         if (newName != oldName) {
-                            val values = ContentValues().apply {
-                                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FA/$category/$newName/")
+                            listOf(
+                                "Pictures" to MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                "Movies" to MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                            ).forEach { (root, collection) ->
+                                val values = ContentValues().apply {
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "$root/FA/$category/$newName/")
+                                }
+                                contentResolver.update(
+                                    collection,
+                                    values,
+                                    "${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+                                    arrayOf("$root/FA/$category/$oldName/")
+                                )
                             }
-                            contentResolver.update(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                values,
-                                "${MediaStore.Images.Media.RELATIVE_PATH} = ?",
-                                arrayOf("Pictures/FA/$category/$oldName/")
-                            )
                             val updated = folders(category).filterNot { it == oldName } + newName
                             saveFolderList(category, updated)
                         }
                         showFileManager()
                     }.setNeutralButton("Elimina lista") { _, _ ->
-                        val hasPhotos = listPhotos().any { it.path == "Pictures/FA/$category/$oldName/" }
-                        if (hasPhotos) toast("Sottocartella non vuota: sposta o elimina prima le foto")
+                        val hasPhotos = listPhotos().any { isInCategory(it.path, category) && it.path.trimEnd('/').endsWith("/$category/$oldName") }
+                        if (hasPhotos) toast("Sottocartella non vuota: sposta o elimina prima foto e video")
                         else saveFolderList(category, folders(category).filterNot { it == oldName })
                         showFileManager()
                     }.show()
@@ -741,8 +815,8 @@ class MainActivity : ComponentActivity() {
                 val all = listPhotos()
                 when (which) {
                     0 -> exportZip(all, "FA-Archivio")
-                    1 -> exportZip(all.filter { it.path.startsWith("Pictures/FA/PERSONALE/") }, "FA-PERSONALE")
-                    2 -> exportZip(all.filter { it.path.startsWith("Pictures/FA/LAVORO/") }, "FA-LAVORO")
+                    1 -> exportZip(all.filter { isInCategory(it.path, "PERSONALE") }, "FA-PERSONALE")
+                    2 -> exportZip(all.filter { isInCategory(it.path, "LAVORO") }, "FA-LAVORO")
                     3 -> AlertDialog.Builder(this).setTitle("Trasferimento USB al PC")
                         .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa → Pictures → FA e copia le cartelle PERSONALE e LAVORO.")
                         .setPositiveButton("OK", null).show()
@@ -751,7 +825,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exportZip(items: List<PhotoItem>, baseName: String) {
-        if (items.isEmpty()) { toast("Non ci sono foto da esportare"); return }
+        if (items.isEmpty()) { toast("Non ci sono elementi da esportare"); return }
         try {
             val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
             val values = ContentValues().apply {
@@ -762,7 +836,7 @@ class MainActivity : ComponentActivity() {
             val zipUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (zipUri == null) { toast("Non riesco a creare il file ZIP"); return }
             val entries = items.map { photo ->
-                Triple(photo.uri, photo.path.substringAfter("Pictures/FA/").trimEnd('/'), photo.name)
+                Triple(photo.uri, photo.path.substringAfter("/FA/").trimEnd('/'), photo.name)
             }
             FaZipExporter.write(contentResolver, zipUri, entries)
             val share = Intent(Intent.ACTION_SEND).apply {
