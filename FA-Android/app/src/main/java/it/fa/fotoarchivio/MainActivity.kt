@@ -5,6 +5,13 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.LayerDrawable
 import android.content.ContentValues
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.OpenableColumns
+import android.provider.Settings
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileOutputStream
 import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
@@ -33,6 +40,9 @@ class MainActivity : ComponentActivity() {
     private var activeCategory = "PERSONALE"
     private var pendingPhoto: Uri? = null
     private var pendingVideo: Uri? = null
+    private var pendingPhotoFile: File? = null
+    private var pendingVideoFile: File? = null
+    private var waitingForStoragePermission = false
     private var importQueue: MutableList<Uri> = mutableListOf()
     private val selectedPhotos = linkedSetOf<String>()
     private var explorerCategory = "PERSONALE"
@@ -75,9 +85,60 @@ class MainActivity : ComponentActivity() {
         window.statusBarColor = 0xFF10191F.toInt()
         window.navigationBarColor = 0xFF05080B.toInt()
         window.decorView.systemUiVisibility = 0
-        showHome()
-        askArchiveAtStartup()
+        if (hasArchiveAccess()) {
+            prepareArchiveFolders()
+            showHome()
+            askArchiveAtStartup()
+        } else requestArchiveAccess()
     }
+
+    private val storageSettingsLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (hasArchiveAccess()) {
+            prepareArchiveFolders()
+            if (waitingForStoragePermission) {
+                waitingForStoragePermission = false
+                showHome()
+                askArchiveAtStartup()
+            }
+        } else toast("Per gestire l'archivio serve l'autorizzazione di accesso ai file")
+    }
+
+    private fun hasArchiveAccess(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
+    private fun requestArchiveAccess() {
+        waitingForStoragePermission = true
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Autorizzazione archivio FA")
+            .setMessage("FA deve poter creare, rinominare, spostare e leggere le proprie cartelle nella memoria condivisa. Serve anche per mantenere l'archivio accessibile da Windows via USB. Non modifica né cancella le foto originali in DCIM/Camera.")
+            .setCancelable(false)
+            .setNegativeButton("Esci") { _, _ -> finish() }
+            .setPositiveButton("Apri impostazioni") { _, _ ->
+                try {
+                    storageSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+                } catch (_: Exception) {
+                    storageSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                }
+            }.show()
+    }
+
+    private fun archiveRoot(isVideo: Boolean): File {
+        val top = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+        return File(Environment.getExternalStorageDirectory(), "$top/FA archivio principale")
+    }
+
+    private fun prepareArchiveFolders() {
+        listOf(false, true).forEach { isVideo ->
+            val root = archiveRoot(isVideo)
+            root.mkdirs()
+            val marker = File(root, ".nomedia")
+            if (!marker.exists()) marker.createNewFile()
+            listOf("PERSONALE", "LAVORO", "INBOX").forEach { File(root, it).mkdirs() }
+        }
+    }
+
+    private fun archiveFileUri(file: File): Uri =
+        FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
 
     private fun askArchiveAtStartup() {
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
