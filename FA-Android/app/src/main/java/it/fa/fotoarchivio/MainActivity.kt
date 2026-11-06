@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
         })
 
         root.addView(ImageView(this).apply {
-            setImageResource(R.drawable.fa_launcher_icon_image)
+            setImageResource(R.drawable.fa_home_image)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "Fotocamera vintage su album fotografico"
         }, LinearLayout.LayoutParams(-1, 0, 1f))
