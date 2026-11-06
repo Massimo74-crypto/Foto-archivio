@@ -1055,51 +1055,40 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun movePhoto(photo: PhotoItem) {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), 0, dp(20), 0)
-        }
-        fun darkAdapter(values: List<String>) = object : ArrayAdapter<String>(
-            this, android.R.layout.simple_spinner_item, values
-        ) {
-            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
-                TextView(this@MainActivity).apply {
-                    text = getItem(position) ?: ""
-                    setTextColor(0xFFF5F1E9.toInt())
-                    setPadding(dp(12), dp(10), dp(12), dp(10))
-                    setBackgroundColor(0xFF263744.toInt())
+        var targetCategory = explorerCategory
+        fun chooseDestination() {
+            val paths = folders(targetCategory)
+            val labels = paths.map { path ->
+                val depth = path.count { it == '/' }
+                ("   ".repeat(depth)) + "📁  " + path.substringAfterLast('/')
+            }.toTypedArray()
+            AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Scegli la cartella in " + targetCategory)
+                .setItems(labels) { _, index ->
+                    val destinationFolder = paths[index]
+                    val root = if (photo.isVideo) "Movies" else "Pictures"
+                    val destinationPath = root + "/FA/" + targetCategory + "/" +
+                        destinationFolder + "/"
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, destinationPath)
+                    }
+                    if (contentResolver.update(photo.uri, values, null, null) > 0) {
+                        explorerCategory = targetCategory
+                        explorerFolder = destinationFolder
+                        showExplorerFolder()
+                    } else toast("Spostamento non riuscito")
                 }
-            override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View =
-                TextView(this@MainActivity).apply {
-                    text = getItem(position) ?: ""
-                    setTextColor(0xFFF5F1E9.toInt())
-                    setPadding(dp(14), dp(12), dp(14), dp(12))
-                    setBackgroundColor(0xFF263744.toInt())
-                }
+                .setNegativeButton("Annulla", null)
+                .show()
         }
-        val category = Spinner(this)
-        category.adapter = darkAdapter(listOf("PERSONALE", "LAVORO"))
-        val folder = Spinner(this)
-        fun refresh() {
-            val values = folders(category.selectedItem.toString())
-            folder.adapter = darkAdapter(values)
-        }
-        category.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
-        folder.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
-        category.onItemSelectedListener = SimpleItemSelectedListener { refresh() }
-        refresh()
-        layout.addView(category)
-        layout.addView(folder)
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Sposta elemento")
-            .setView(layout)
+            .setItems(arrayOf("PERSONALE", "LAVORO")) { _, which ->
+                targetCategory = if (which == 0) "PERSONALE" else "LAVORO"
+                chooseDestination()
+            }
             .setNegativeButton("Annulla", null)
-            .setPositiveButton("Sposta") { _, _ ->
-                val path = categoryFolderPath(photo, category.selectedItem.toString(), folder.selectedItem.toString())
-                val values = ContentValues().apply { put(MediaStore.MediaColumns.RELATIVE_PATH, path) }
-                contentResolver.update(photo.uri, values, null, null)
-                showFileManager()
-            }.show()
+            .show()
     }
 
     private fun manageFolders() {
