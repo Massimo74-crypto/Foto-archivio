@@ -928,17 +928,22 @@ class MainActivity : ComponentActivity() {
                         if (value == oldPath || value.startsWith(oldPath + "/"))
                             newPath + value.removePrefix(oldPath) else value
                     }.toSet()
-                    saveFolderList(explorerCategory, changed.toList())
                     var renameOk = true
+                    val moved = mutableListOf<Pair<File, File>>()
                     listOf(false, true).forEach { isVideo ->
                         val oldDir = File(archiveRoot(isVideo), "$explorerCategory/$oldPath")
                         if (oldDir.exists()) {
                             val newDir = File(archiveRoot(isVideo), "$explorerCategory/$newPath")
                             newDir.parentFile?.mkdirs()
                             if (newDir.exists() || !oldDir.renameTo(newDir)) renameOk = false
+                            else moved.add(newDir to oldDir)
                         }
                     }
-                    if (!renameOk) toast("Una o più cartelle non sono state rinominate")
+                    if (renameOk) saveFolderList(explorerCategory, changed.toList())
+                    else {
+                        moved.asReversed().forEach { (newDir, oldDir) -> newDir.renameTo(oldDir) }
+                        toast("Rinomina non riuscita: archivio lasciato invariato")
+                    }
                     if (explorerFolder == oldPath || explorerFolder.startsWith(oldPath + "/"))
                         explorerFolder = newPath + explorerFolder.removePrefix(oldPath)
                     prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
