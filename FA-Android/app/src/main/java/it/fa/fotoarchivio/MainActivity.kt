@@ -468,8 +468,8 @@ class MainActivity : ComponentActivity() {
             contentResolver.query(
                 collection,
                 projection,
-                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
-                arrayOf("$root/FA/%"),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} NOT LIKE ?",
+                arrayOf("$root/FA/%", "$root/FA/INBOX/%"),
                 "${MediaStore.MediaColumns.DATE_ADDED} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
@@ -524,7 +524,7 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("COLLEGA AL PC VIA USB") {
             AlertDialog.Builder(this).setTitle("Trasferimento USB al PC")
-                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa → Pictures → FA. Copia PERSONALE e LAVORO sul PC.")
+                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA e i video in Movies → FA: copia PERSONALE e LAVORO da entrambe le posizioni.")
                 .setPositiveButton("OK", null).show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("INDIETRO") { showHome() }, LinearLayout.LayoutParams(-1, dp(48)))
@@ -543,7 +543,7 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(22), dp(28), dp(22), dp(48))
         }
         root.addView(TextView(this).apply {
-            text = "Pictures / FA / $category"
+            text = "Archivio FA / $category"
             textSize = 13f
             setTextColor(0xFFB9C4CF.toInt())
             setPadding(0, 0, 0, dp(12))
@@ -594,7 +594,7 @@ class MainActivity : ComponentActivity() {
     private fun showExplorerFolder() {
         val root = page(explorerCategory)
         root.addView(TextView(this).apply {
-            text = "Pictures / FA / $explorerCategory"
+            text = "Archivio FA / $explorerCategory"
             textSize = 13f
             setTextColor(0xFFB9C4CF.toInt())
         })
@@ -688,7 +688,7 @@ class MainActivity : ComponentActivity() {
     private fun showBulkPhotoActions() {
         val chosen = listPhotos().filter { selectedPhotos.contains(it.uri.toString()) }
         if (chosen.isEmpty()) { toast("Seleziona prima uno o più elementi"); return }
-        AlertDialog.Builder(this).setTitle("${chosen.size} foto selezionate")
+        AlertDialog.Builder(this).setTitle("${chosen.size} elementi selezionati")
             .setItems(arrayOf("Esporta selezione in ZIP", "Elimina selezione")) { _, which ->
                 if (which == 0) exportZip(chosen, "FA-Selezione")
                 else AlertDialog.Builder(this).setMessage("Eliminare definitivamente gli elementi selezionati?")
@@ -704,11 +704,12 @@ class MainActivity : ComponentActivity() {
     private fun showPhotoActions(photo: PhotoItem) {
         AlertDialog.Builder(this)
             .setTitle(photo.name)
-            .setItems(arrayOf("Rinomina", "Sposta in un'altra cartella", "Elimina")) { _, which ->
+            .setItems(arrayOf("Apri", "Rinomina", "Sposta in un'altra cartella", "Elimina")) { _, which ->
                 when (which) {
-                    0 -> renamePhoto(photo)
-                    1 -> movePhoto(photo)
-                    2 -> AlertDialog.Builder(this)
+                    0 -> openMediaItem(photo)
+                    1 -> renamePhoto(photo)
+                    2 -> movePhoto(photo)
+                    3 -> AlertDialog.Builder(this)
                         .setMessage("Eliminare definitivamente questo elemento?")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Elimina") { _, _ ->
@@ -719,10 +720,22 @@ class MainActivity : ComponentActivity() {
             }.show()
     }
 
+    private fun openMediaItem(item: PhotoItem) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(item.uri, if (item.isVideo) "video/*" else "image/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            toast("Non trovo un'app adatta per aprire questo elemento")
+        }
+    }
+
     private fun renamePhoto(photo: PhotoItem) {
         val input = darkEditText(initialText = photo.name.substringBeforeLast('.')).apply { selectAll() }
         AlertDialog.Builder(this)
-            .setTitle("Rinomina foto")
+            .setTitle("Rinomina elemento")
             .setView(input)
             .setNegativeButton("Annulla", null)
             .setPositiveButton("Salva") { _, _ ->
@@ -752,7 +765,7 @@ class MainActivity : ComponentActivity() {
         layout.addView(category)
         layout.addView(folder)
         AlertDialog.Builder(this)
-            .setTitle("Sposta foto")
+            .setTitle("Sposta elemento")
             .setView(layout)
             .setNegativeButton("Annulla", null)
             .setPositiveButton("Sposta") { _, _ ->
@@ -818,7 +831,7 @@ class MainActivity : ComponentActivity() {
                     1 -> exportZip(all.filter { isInCategory(it.path, "PERSONALE") }, "FA-PERSONALE")
                     2 -> exportZip(all.filter { isInCategory(it.path, "LAVORO") }, "FA-LAVORO")
                     3 -> AlertDialog.Builder(this).setTitle("Trasferimento USB al PC")
-                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa → Pictures → FA e copia le cartelle PERSONALE e LAVORO.")
+                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA e i video in Movies → FA; copia le cartelle PERSONALE e LAVORO da entrambe le posizioni.")
                         .setPositiveButton("OK", null).show()
                 }
             }.show()
