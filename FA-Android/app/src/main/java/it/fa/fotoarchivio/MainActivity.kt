@@ -618,42 +618,27 @@ class MainActivity : ComponentActivity() {
         dialog.show()
     }
 
-    private data class PhotoItem(val uri: Uri, val name: String, val path: String, val isVideo: Boolean = false)
+    private data class PhotoItem(val file: File, val uri: Uri, val name: String, val path: String, val isVideo: Boolean = false)
 
     private fun listPhotos(): List<PhotoItem> {
         val result = mutableListOf<PhotoItem>()
-        val projection = arrayOf(
-            MediaStore.MediaColumns._ID,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.RELATIVE_PATH
-        )
-        fun collect(collection: Uri, isVideo: Boolean, root: String) {
-            contentResolver.query(
-                collection,
-                projection,
-                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} NOT LIKE ?",
-                arrayOf("$root/FA archivio principale/%", "$root/FA archivio principale/INBOX/%"),
-                "${MediaStore.MediaColumns.DATE_ADDED} DESC"
-            )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                val pathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idCol)
-                    result.add(
-                        PhotoItem(
-                            Uri.withAppendedPath(collection, id.toString()),
-                            cursor.getString(nameCol) ?: if (isVideo) "Video" else "Foto",
-                            cursor.getString(pathCol) ?: "",
-                            isVideo
-                        )
-                    )
+        listOf(false, true).forEach { isVideo ->
+            val root = archiveRoot(isVideo)
+            if (!root.exists()) return@forEach
+            root.walkTopDown()
+                .filter { it.isFile && it.name != ".nomedia" && !it.relativeTo(root).path.replace(File.separatorChar, '/').startsWith("INBOX/") }
+                .forEach { file ->
+                    val rootName = if (isVideo) "Movies" else "Pictures"
+                    val relative = file.relativeTo(Environment.getExternalStorageDirectory()).path.replace(File.separatorChar, '/')
+                    if (relative.startsWith("$rootName/FA archivio principale/PERSONALE/") ||
+                        relative.startsWith("$rootName/FA archivio principale/LAVORO/")) {
+                        try {
+                            result.add(PhotoItem(file, archiveFileUri(file), file.name, relative, isVideo))
+                        } catch (_: Exception) { }
+                    }
                 }
-            }
         }
-        collect(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, false, "Pictures")
-        collect(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, "Movies")
-        return result
+        return result.sortedByDescending { it.file.lastModified() }
     }
 
     private fun isInCategory(path: String, category: String): Boolean =
@@ -994,28 +979,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun deleteFaItem(photo: PhotoItem): Boolean {
-        // Verifica il percorso reale della riga MediaStore, non soltanto il dato in elenco.
-        // Se la verifica non riesce, si blocca la cancellazione (fail closed).
-        val actualPath = try {
-            contentResolver.query(
-                photo.uri,
-                arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
-                null, null, null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
-            }
-        } catch (_: Exception) { null }
-        val isManaged = actualPath?.let {
-            it.startsWith("Pictures/FA archivio principale/PERSONALE/") ||
-                it.startsWith("Pictures/FA archivio principale/LAVORO/") ||
-                it.startsWith("Movies/FA archivio principale/PERSONALE/") ||
-                it.startsWith("Movies/FA archivio principale/LAVORO/")
-        } == true
-        if (!isManaged) {
+        val root = archiveRoot(photo.isVideo).canonicalFile
+        val file = photo.file.canonicalFile
+        val path = file.absolutePath
+        val base = root.absolutePath + File.separator
+        val isManaged = path.startsWith(base + "PERSONALE" + File.separator) ||
+            path.startsWith(base + "LAVORO" + File.separator)
+        if (!isManaged || !file.isFile) {
             toast("Cancellazione bloccata: percorso FA non verificato")
             return false
         }
-        return contentResolver.delete(photo.uri, null, null) > 0
+        return file.delete()
     }
 
     private fun showPhotoActions(photo: PhotoItem) {
@@ -1057,11 +1031,11 @@ class MainActivity : ComponentActivity() {
             .setNegativeButton("Annulla", null)
             .setPositiveButton("Salva") { _, _ ->
                 val base = safeFolder(input.text.toString())
-                val extension = if (photo.isVideo) ".mp4" else ".jpg"
-                val file = if (base.lowercase(Locale.ROOT).endsWith(extension)) base else "$base$extension"
-                val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, file) }
-                contentResolver.update(photo.uri, values, null, null)
-                showFileManager()
+                val extension = photo.file.extension.takeIf { it.isNotBlank() }?.let { ".$it" } ?: if (photo.isVideo) ".mp4" else ".jpg"
+                val fileName = if (base.lowercase(Locale.ROOT).endsWith(extension)) base else "$base$extension"
+                val target = File(photo.file.parentFile, fileName)
+                if (!target.exists() && photo.file.renameTo(target)) showFileManager()
+                else toast("Rinomina non riuscita: nome già presente o file non accessibile")
             }.show()
     }
 
@@ -1077,17 +1051,14 @@ class MainActivity : ComponentActivity() {
                 .setTitle("Scegli la cartella in " + targetCategory)
                 .setItems(labels) { _, index ->
                     val destinationFolder = paths[index]
-                    val root = if (photo.isVideo) "Movies" else "Pictures"
-                    val destinationPath = root + "/FA archivio principale/" + targetCategory + "/" +
-                        destinationFolder + "/"
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, destinationPath)
-                    }
-                    if (contentResolver.update(photo.uri, values, null, null) > 0) {
+                    val destinationDir = File(archiveRoot(photo.isVideo), "$targetCategory/$destinationFolder")
+                    destinationDir.mkdirs()
+                    val target = File(destinationDir, photo.file.name)
+                    if (!target.exists() && photo.file.renameTo(target)) {
                         explorerCategory = targetCategory
                         explorerFolder = destinationFolder
                         showExplorerFolder()
-                    } else toast("Spostamento non riuscito")
+                    } else toast("Spostamento non riuscito: nome già presente o file non accessibile")
                 }
                 .setNegativeButton("Annulla", null)
                 .show()
