@@ -18,6 +18,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ImageView
+import android.widget.HorizontalScrollView
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -328,7 +329,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showNextImportedItem() {
         if (importQueue.isEmpty()) {
-            showFileManager()
+            showExplorerFolder()
             return
         }
         val uri = importQueue.removeAt(0)
@@ -688,11 +689,19 @@ class MainActivity : ComponentActivity() {
                 showExplorerFolder()
             }, LinearLayout.LayoutParams(-2, dp(40)).apply { rightMargin = dp(4) })
         }
-        root.addView(ScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(crumbs) },
-            LinearLayout.LayoutParams(-1, dp(46)))
+        root.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            isFillViewport = false
+            addView(crumbs)
+        }, LinearLayout.LayoutParams(-1, dp(46)))
         root.addView(actionButton("＋ NUOVA SOTTOCARTELLA") {
             createChildFolder(current)
         }, LinearLayout.LayoutParams(-1, dp(46)))
+        root.addView(actionButton("⬇ IMPORTA FOTO E VIDEO QUI") {
+            activeCategory = explorerCategory
+            prefs.edit().putString(lastFolderKey(explorerCategory), current).apply()
+            importLauncher.launch(arrayOf("image/*", "video/*"))
+        }, LinearLayout.LayoutParams(-1, dp(48)))
         if (current.isNotBlank()) {
             root.addView(actionButton("↑ CARTELLA SUPERIORE") {
                 explorerFolder = current.substringBeforeLast('/', "")
