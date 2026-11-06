@@ -171,16 +171,33 @@ class MainActivity : ComponentActivity() {
             bottomMargin = dp(12)
         })
 
+        val categories = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        categories.addView(actionButton(if (activeCategory == "PERSONALE") "👤  PERSONALE  ✓" else "👤  PERSONALE") {
+            activeCategory = "PERSONALE"
+            showHome()
+            toast("Archivio attivo: PERSONALE")
+        }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { rightMargin = dp(7) })
+        categories.addView(actionButton(if (activeCategory == "LAVORO") "💼  LAVORO  ✓" else "💼  LAVORO") {
+            activeCategory = "LAVORO"
+            showHome()
+            toast("Archivio attivo: LAVORO")
+        }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
+        root.addView(categories, LinearLayout.LayoutParams(-1, dp(58)).apply {
+            bottomMargin = dp(6)
+        })
+
         val captureButtons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
         captureButtons.addView(actionButton("📷  SCATTA FOTO") {
             launchCamera()
-        }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { rightMargin = dp(7) })
+        }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { rightMargin = dp(7) })
         captureButtons.addView(actionButton("🎥  REGISTRA VIDEO") {
             launchVideoCamera()
-        }, LinearLayout.LayoutParams(0, dp(70), 1f).apply { leftMargin = dp(7) })
-        root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(70)).apply {
+        }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
+        root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(58)).apply {
             bottomMargin = dp(8)
         })
 
