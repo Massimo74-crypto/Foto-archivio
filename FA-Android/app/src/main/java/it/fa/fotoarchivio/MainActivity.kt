@@ -324,7 +324,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun safeFolder(value: String): String =
-        value.trim().replace(Regex("[\\\\/:*?\\"<>|]"), "_").ifBlank { "Generale" }
+        value.trim().replace(Regex("[\\\\/:*?<>|]"), "_").replace("\"", "_").ifBlank { "Generale" }
 
     private fun showNextImportedItem() {
         if (importQueue.isEmpty()) {
