@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        activeCategory = prefs.getString("active_category", "PERSONALE") ?: "PERSONALE"
         window.statusBarColor = 0xFF10191F.toInt()
         window.navigationBarColor = 0xFF05080B.toInt()
         window.decorView.systemUiVisibility = 0
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
             .setTitle("Quale archivio vuoi aprire?")
             .setItems(arrayOf("👤  PERSONALE", "💼  LAVORO")) { _, which ->
                 activeCategory = if (which == 1) "LAVORO" else "PERSONALE"
+                prefs.edit().putString("active_category", activeCategory).apply()
                 showHome()
             }
             .setCancelable(false)
@@ -191,11 +193,13 @@ class MainActivity : ComponentActivity() {
         }
         categories.addView(actionButton(if (activeCategory == "PERSONALE") "👤  PERSONALE  ✓" else "👤  PERSONALE") {
             activeCategory = "PERSONALE"
+            prefs.edit().putString("active_category", activeCategory).apply()
             showHome()
             toast("Archivio attivo: PERSONALE")
         }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { rightMargin = dp(7) })
         categories.addView(actionButton(if (activeCategory == "LAVORO") "💼  LAVORO  ✓" else "💼  LAVORO") {
             activeCategory = "LAVORO"
+            prefs.edit().putString("active_category", activeCategory).apply()
             showHome()
             toast("Archivio attivo: LAVORO")
         }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
@@ -531,46 +535,25 @@ class MainActivity : ComponentActivity() {
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 }
                 val saved = if (isImported) {
-                    // Se l'elemento selezionato è già nell'archivio FA, sposta/aggiorna
-                    // la riga MediaStore esistente: non creare una seconda copia.
-                    // Prima interroghiamo direttamente l'URI ricevuto dal selettore.
-                    // Se indica DCIM/Camera o un'altra cartella esterna, deve essere COPIATO.
-                    val directSourcePath = try {
-                        contentResolver.query(
-                            uri,
-                            arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
-                            null, null, null
-                        )?.use { cursor ->
-                            if (cursor.moveToFirst()) cursor.getString(0) else null
-                        }
-                    } catch (_: Exception) { null }
-                    val expectedRoot = if (isVideo) "Movies/FA/" else "Pictures/FA/"
-                    // Aggiorniamo in-place SOLO se l'URI originale dichiara direttamente
-                    // un percorso FA. Se il percorso diretto non è verificabile, copiamo:
-                    // mai rischiare di spostare o riutilizzare l'originale di DCIM/Camera.
-                    val alreadyInFa = directSourcePath?.startsWith(expectedRoot) == true
-                    val sourceUri = uri
-                    if (alreadyInFa) {
-                        contentResolver.update(sourceUri, values, null, null) > 0
-                    } else {
-                        val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                        val destination = contentResolver.insert(collection, values)
-                        if (destination == null) false else try {
-                            val input = contentResolver.openInputStream(uri)
-                            val output = contentResolver.openOutputStream(destination, "w")
-                            if (input == null || output == null) {
-                                input?.close()
-                                output?.close()
-                                contentResolver.delete(destination, null, null)
-                                false
-                            } else {
-                                input.use { source -> output.use { target -> source.copyTo(target) } }
-                                true
-                            }
-                        } catch (_: Exception) {
+                    // IMPORTAZIONE SEMPRE PER COPIA: non aggiornare mai la riga MediaStore
+                    // della sorgente. In questo modo DCIM/Camera e FA restano indipendenti.
+                    val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    val destination = contentResolver.insert(collection, values)
+                    if (destination == null) false else try {
+                        val input = contentResolver.openInputStream(uri)
+                        val output = contentResolver.openOutputStream(destination, "w")
+                        if (input == null || output == null) {
+                            input?.close()
+                            output?.close()
                             contentResolver.delete(destination, null, null)
                             false
+                        } else {
+                            input.use { source -> output.use { target -> source.copyTo(target) } }
+                            true
                         }
+                    } catch (_: Exception) {
+                        contentResolver.delete(destination, null, null)
+                        false
                     }
                 } else {
                     contentResolver.update(uri, values, null, null) > 0
@@ -973,12 +956,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun deleteFaItem(photo: PhotoItem): Boolean {
-        val isManaged = photo.path.startsWith("Pictures/FA/PERSONALE/") ||
-            photo.path.startsWith("Pictures/FA/LAVORO/") ||
-            photo.path.startsWith("Movies/FA/PERSONALE/") ||
-            photo.path.startsWith("Movies/FA/LAVORO/")
+        // Verifica il percorso reale della riga MediaStore, non soltanto il dato in elenco.
+        // Se la verifica non riesce, si blocca la cancellazione (fail closed).
+        val actualPath = try {
+            contentResolver.query(
+                photo.uri,
+                arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (_: Exception) { null }
+        val isManaged = actualPath?.let {
+            it.startsWith("Pictures/FA/PERSONALE/") ||
+                it.startsWith("Pictures/FA/LAVORO/") ||
+                it.startsWith("Movies/FA/PERSONALE/") ||
+                it.startsWith("Movies/FA/LAVORO/")
+        } == true
         if (!isManaged) {
-            toast("Operazione bloccata: il file non risulta una copia nell'archivio FA")
+            toast("Cancellazione bloccata: percorso FA non verificato")
             return false
         }
         return contentResolver.delete(photo.uri, null, null) > 0
