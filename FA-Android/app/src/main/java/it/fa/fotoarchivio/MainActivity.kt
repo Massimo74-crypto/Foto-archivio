@@ -596,9 +596,7 @@ class MainActivity : ComponentActivity() {
             setImageResource(R.drawable.fa_home_image)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "Fotocamera vintage su album fotografico"
-        }, LinearLayout.LayoutParams(dp(278), dp(278)).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-        })
+        }, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(TextView(this).apply {
             text = "Creato da M@xm@so74 con Chatgpt"
             textSize = 11f
