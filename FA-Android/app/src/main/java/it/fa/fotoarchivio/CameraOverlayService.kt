@@ -94,6 +94,9 @@ class CameraOverlayService : Service() {
         folder = intent?.getStringExtra(EXTRA_FOLDER) ?: "Generale"
         sessionStartSeconds = (intent?.getLongExtra(EXTRA_START_TIME, System.currentTimeMillis()) 
             ?: System.currentTimeMillis()) / 1000L
+        // Avvia il fix GPS all'inizio della sessione, prima che l'utente scatti.
+        // Mantiene gli aggiornamenti attivi durante l'uso della fotocamera.
+        startLocationCapture()
         contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
         )
@@ -138,7 +141,6 @@ class CameraOverlayService : Service() {
                 candidateSize = size
                 stableChecks = 0
                 photoDateTakenMillis = getPhotoDateTaken(uri)
-                startLocationCapture()
                 handler.postDelayed(this, 900L)
                 return
             }
@@ -222,17 +224,15 @@ class CameraOverlayService : Service() {
                         (location.time > current.time && location.accuracy <= current.accuracy + 15f)) {
                         candidateLocation = location
                     }
-                    if (location.accuracy <= 20f) stopLocationUpdates()
                 }
             }
             locationListener = listener
             manager.getProviders(true)
                 .filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
                 .forEach { provider ->
-                    try { manager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper()) }
+                    try { manager.requestLocationUpdates(provider, 1000L, 0f, listener, Looper.getMainLooper()) }
                     catch (_: SecurityException) { }
                 }
-            handler.postDelayed(locationTimeout, 10_000L)
         } catch (_: Exception) {
             stopLocationUpdates()
         }
@@ -258,7 +258,7 @@ class CameraOverlayService : Service() {
                 exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, formatter.format(Date(takenAt)))
                 exif.setAttribute(ExifInterface.TAG_DATETIME, formatter.format(Date(takenAt)))
             }
-            val location = candidateLocation?.takeIf { System.currentTimeMillis() - it.time <= 120_000L }
+            val location = candidateLocation?.takeIf { System.currentTimeMillis() - it.time <= 30_000L }
             if (location != null) {
                 exif.setLatLong(location.latitude, location.longitude)
                 if (location.hasAltitude()) {
