@@ -16,6 +16,11 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.Handler
+import android.os.Looper
+import android.location.Location
+import android.location.LocationManager
 import android.provider.MediaStore
 import android.view.View
 import android.view.Gravity
@@ -53,6 +58,10 @@ class MainActivity : ComponentActivity() {
     private var explorerFolder = "Generale"
     private var sortMode = "Data"
     private val prefs by lazy { getSharedPreferences("fa_settings", Context.MODE_PRIVATE) }
+    private val gpsHandler = Handler(Looper.getMainLooper())
+    private var gpsCancellation: CancellationSignal? = null
+    private var bestCameraLocation: Location? = null
+    private var gpsLaunchFinished = false
 
     private val cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val uri = pendingPhoto
@@ -82,7 +91,7 @@ class MainActivity : ComponentActivity() {
         val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (!granted) toast("Posizione non autorizzata: FA salverà comunque la foto, ma senza nuove coordinate GPS")
-        startNativeCameraSession()
+        acquireLocationThenStartCamera()
     }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -360,7 +369,7 @@ class MainActivity : ComponentActivity() {
         val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (fine || coarse) {
-            startNativeCameraSession()
+            acquireLocationThenStartCamera()
         } else {
             locationPermissionLauncher.launch(arrayOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -369,7 +378,68 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startNativeCameraSession() {
+    /**
+     * Acquisisce un fix mentre MainActivity è ancora visibile.
+     * La fotocamera Motorola viene avviata comunque dopo il primo fix utile
+     * oppure dopo un timeout breve: il GPS non blocca mai lo scatto.
+     */
+    private fun acquireLocationThenStartCamera() {
+        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) {
+            startNativeCameraSession()
+            return
+        }
+        val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val providers = try {
+            manager.getProviders(true).filter {
+                it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER
+            }
+        } catch (_: Exception) { emptyList() }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || providers.isEmpty()) {
+            startNativeCameraSession()
+            return
+        }
+        gpsCancellation?.cancel()
+        gpsCancellation = CancellationSignal()
+        bestCameraLocation = null
+        gpsLaunchFinished = false
+        val timeout = Runnable { finishLocationAcquisition() }
+        gpsHandler.removeCallbacksAndMessages(null)
+        gpsHandler.postDelayed(timeout, 7000L)
+        var requested = false
+        providers.forEach { provider ->
+            try {
+                manager.getCurrentLocation(provider, gpsCancellation, mainExecutor) { location ->
+                    if (gpsLaunchFinished) return@getCurrentLocation
+                    if (location != null) {
+                        val current = bestCameraLocation
+                        if (current == null || !current.hasAccuracy() ||
+                            (location.hasAccuracy() && location.accuracy < current.accuracy)) {
+                            bestCameraLocation = location
+                        }
+                        // Un breve margine permette al GPS di superare il fix di rete.
+                        gpsHandler.removeCallbacks(timeout)
+                        gpsHandler.postDelayed(timeout, 1200L)
+                    }
+                }
+                requested = true
+            } catch (_: SecurityException) { }
+              catch (_: Exception) { }
+        }
+        if (!requested) finishLocationAcquisition()
+    }
+
+    private fun finishLocationAcquisition() {
+        if (gpsLaunchFinished) return
+        gpsLaunchFinished = true
+        gpsHandler.removeCallbacksAndMessages(null)
+        gpsCancellation?.cancel()
+        gpsCancellation = null
+        startNativeCameraSession(bestCameraLocation)
+    }
+
+    private fun startNativeCameraSession(location: Location? = null) {
         try {
             prepareArchiveFolders()
             val folder = prefs.getString(lastFolderKey(activeCategory), "Generale") ?: "Generale"
@@ -377,6 +447,13 @@ class MainActivity : ComponentActivity() {
                 putExtra(CameraOverlayService.EXTRA_CATEGORY, activeCategory)
                 putExtra(CameraOverlayService.EXTRA_FOLDER, folder)
                 putExtra(CameraOverlayService.EXTRA_START_TIME, System.currentTimeMillis())
+                location?.let {
+                    putExtra(CameraOverlayService.EXTRA_GPS_LATITUDE, it.latitude)
+                    putExtra(CameraOverlayService.EXTRA_GPS_LONGITUDE, it.longitude)
+                    putExtra(CameraOverlayService.EXTRA_GPS_TIME, it.time)
+                    if (it.hasAltitude()) putExtra(CameraOverlayService.EXTRA_GPS_ALTITUDE, it.altitude)
+                    if (it.hasAccuracy()) putExtra(CameraOverlayService.EXTRA_GPS_ACCURACY, it.accuracy)
+                }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
             else startService(serviceIntent)
