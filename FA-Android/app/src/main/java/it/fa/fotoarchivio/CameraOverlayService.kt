@@ -115,6 +115,9 @@ class CameraOverlayService : Service() {
         contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
         )
+        // Avvia anche un controllo periodico: non dipendiamo esclusivamente
+        // dalla notifica MediaStore, che su alcuni telefoni può arrivare in ritardo.
+        schedulePhotoCheck(1000L)
         return START_NOT_STICKY
     }
 
