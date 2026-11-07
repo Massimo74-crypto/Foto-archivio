@@ -66,6 +66,8 @@ class CameraOverlayService : Service() {
     private val handledFilePaths = mutableSetOf<String>()
     private val completedFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
+    private var pendingPopupFile: File? = null
+    private var pendingPopupRunnable: Runnable? = null
     private var sourceReadyForSave = false
     private var pendingSaveStartedAt = 0L
     private var pendingSaveFile: File? = null
@@ -178,14 +180,28 @@ class CameraOverlayService : Service() {
             return
         }
         if (handledFilePaths.contains(path) || overlay != null) return
-
-        // CREATE arriva normalmente prima della scrittura completa: mostra subito
-        // il campo nome, ma non permette di copiare il file finché non è chiuso.
         if (event and (FileObserver.CREATE or FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO) == 0) return
         if (!file.exists()) return
+
+        // CREATE è il segnale più vicino allo scatto che Android ci espone.
+        // Attende 500 ms per evitare falsi avvii, ma non aspetta la fine del file.
+        val currentPending = pendingPopupFile
+        if (currentPending != null && filePath(currentPending) == path) return
+        if (currentPending != null) return
+
+        pendingPopupFile = file
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
-        sourceReadyForSave = isCompleteEvent && file.length() > 0L
-        showNameOverlay(null, -1L, file)
+        val show = Runnable {
+            if (pendingPopupFile?.let { filePath(it) } != path) return@Runnable
+            pendingPopupFile = null
+            pendingPopupRunnable = null
+            if (overlay != null || handledFilePaths.contains(path) || !file.exists()) return@Runnable
+            sourceReadyForSave = completedFilePaths.contains(path) && file.length() > 0L
+            photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
+            showNameOverlay(null, -1L, file)
+        }
+        pendingPopupRunnable = show
+        handler.postDelayed(show, 500L)
     }
 
     private fun continuePendingSave(file: File) {
@@ -418,6 +434,11 @@ class CameraOverlayService : Service() {
         saveInProgress = false
         sourceReadyForSave = sourceFile?.let { completedFilePaths.contains(filePath(it)) } ?: true
         pendingSaveFile = null
+        if (sourceFile != null && pendingPopupFile?.let { filePath(it) } == filePath(sourceFile)) {
+            pendingPopupRunnable?.let { handler.removeCallbacks(it) }
+            pendingPopupRunnable = null
+            pendingPopupFile = null
+        }
         pendingSaveStartedAt = 0L
         photoUri = uri
         displayedFile = sourceFile
@@ -730,7 +751,7 @@ class CameraOverlayService : Service() {
         photoUri = null
         if (markAsHandled && handledId >= 0L) lastSavedId = handledId
         if (markAsHandled) displayedFile?.let { file ->
-            handledFilePaths.add(try { file.canonicalPath } catch (_: Exception) { file.absolutePath })
+            handledFilePaths.add(filePath(file))
         }
         displayedFile = null
         displayedId = -1L
