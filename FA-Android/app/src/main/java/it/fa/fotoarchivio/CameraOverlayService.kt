@@ -50,6 +50,8 @@ class CameraOverlayService : Service() {
     private var candidateUri: Uri? = null
     private var candidateSize = -1L
     private var stableChecks = 0
+    private var photoCheckPending = false
+    private var photoCheckAttempts = 0
     private var displayedId = -1L
     private var lastSavedId = -1L
 
@@ -104,31 +106,52 @@ class CameraOverlayService : Service() {
     }
 
     private fun schedulePhotoCheck() {
-        if (overlay != null) return
-        handler.removeCallbacks(photoCheck)
-        handler.postDelayed(photoCheck, 1200L)
+        if (overlay != null || photoCheckPending) return
+        photoCheckPending = true
+        photoCheckAttempts = 0
+        handler.postDelayed(photoCheck, 250L)
+    }
+
+    private fun retryPhotoCheck() {
+        photoCheckAttempts++
+        if (photoCheckAttempts >= 24) {
+            photoCheckPending = false
+            candidateUri = null
+            candidateSize = -1L
+            stableChecks = 0
+            return
+        }
+        handler.postDelayed(photoCheck, 250L)
     }
 
     private val photoCheck = object : Runnable {
         override fun run() {
-            if (overlay != null) return
-            val latest = findLatestCameraPhoto() ?: return
+            if (overlay != null) {
+                photoCheckPending = false
+                return
+            }
+            val latest = findLatestCameraPhoto()
+            if (latest == null) {
+                retryPhotoCheck()
+                return
+            }
             val uri = latest.first
             val size = latest.second
             if (uri != candidateUri) {
                 candidateUri = uri
                 candidateSize = size
                 stableChecks = 0
-                handler.postDelayed(this, 900L)
+                retryPhotoCheck()
                 return
             }
             if (size > 0L && size == candidateSize) stableChecks++ else stableChecks = 0
             candidateSize = size
             if (stableChecks >= 1) {
                 val id = uri.lastPathSegment?.toLongOrNull() ?: -1L
+                photoCheckPending = false
                 if (id != lastSavedId && id != displayedId) showNameOverlay(uri, id)
             } else {
-                handler.postDelayed(this, 900L)
+                retryPhotoCheck()
             }
         }
     }
