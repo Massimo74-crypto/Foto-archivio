@@ -45,6 +45,11 @@ class CameraOverlayService : Service() {
         const val EXTRA_CATEGORY = "fa_category"
         const val EXTRA_FOLDER = "fa_folder"
         const val EXTRA_START_TIME = "fa_start_time"
+        const val EXTRA_GPS_LATITUDE = "fa_gps_latitude"
+        const val EXTRA_GPS_LONGITUDE = "fa_gps_longitude"
+        const val EXTRA_GPS_TIME = "fa_gps_time"
+        const val EXTRA_GPS_ALTITUDE = "fa_gps_altitude"
+        const val EXTRA_GPS_ACCURACY = "fa_gps_accuracy"
         private const val CHANNEL_ID = "fa_camera_overlay"
         private const val NOTIFICATION_ID = 7401
     }
@@ -97,6 +102,16 @@ class CameraOverlayService : Service() {
         // Avvia il fix GPS all'inizio della sessione, prima che l'utente scatti.
         // Mantiene gli aggiornamenti attivi durante l'uso della fotocamera.
         startLocationCapture()
+        if (intent?.hasExtra(EXTRA_GPS_LATITUDE) == true &&
+            intent.hasExtra(EXTRA_GPS_LONGITUDE) && intent.hasExtra(EXTRA_GPS_TIME)) {
+            candidateLocation = Location("FA-current-fix").apply {
+                latitude = intent.getDoubleExtra(EXTRA_GPS_LATITUDE, 0.0)
+                longitude = intent.getDoubleExtra(EXTRA_GPS_LONGITUDE, 0.0)
+                time = intent.getLongExtra(EXTRA_GPS_TIME, System.currentTimeMillis())
+                if (intent.hasExtra(EXTRA_GPS_ALTITUDE)) altitude = intent.getDoubleExtra(EXTRA_GPS_ALTITUDE, 0.0)
+                if (intent.hasExtra(EXTRA_GPS_ACCURACY)) accuracy = intent.getFloatExtra(EXTRA_GPS_ACCURACY, 0f)
+            }
+        }
         contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
         )
@@ -124,16 +139,20 @@ class CameraOverlayService : Service() {
             .build()
     }
 
-    private fun schedulePhotoCheck() {
+    private fun schedulePhotoCheck(delayMillis: Long = 1200L) {
         if (overlay != null) return
         handler.removeCallbacks(photoCheck)
-        handler.postDelayed(photoCheck, 1200L)
+        handler.postDelayed(photoCheck, delayMillis)
     }
 
     private val photoCheck = object : Runnable {
         override fun run() {
             if (overlay != null) return
-            val latest = findLatestCameraPhoto() ?: return
+            val latest = findLatestCameraPhoto()
+            if (latest == null) {
+                handler.postDelayed(this, 1000L)
+                return
+            }
             val uri = latest.first
             val size = latest.second
             if (uri != candidateUri) {
@@ -511,6 +530,7 @@ class CameraOverlayService : Service() {
         candidateUri = null
         candidateSize = -1L
         stableChecks = 0
+        if (markAsHandled) schedulePhotoCheck(350L)
     }
 
     override fun onDestroy() {
