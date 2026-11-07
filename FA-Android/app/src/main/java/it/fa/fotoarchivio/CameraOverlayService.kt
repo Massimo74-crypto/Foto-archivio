@@ -64,7 +64,11 @@ class CameraOverlayService : Service() {
     private var photoUri: Uri? = null
     private var displayedFile: File? = null
     private val handledFilePaths = mutableSetOf<String>()
+    private val completedFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
+    private var sourceReadyForSave = false
+    private var pendingSaveStartedAt = 0L
+    private var pendingSaveFile: File? = null
     private var category = "PERSONALE"
     private var folder = "Generale"
     private var sessionStartSeconds = 0L
@@ -140,13 +144,13 @@ class CameraOverlayService : Service() {
             cameraDirectoryObserver?.stopWatching()
             cameraDirectoryObserver = object : FileObserver(
                 cameraDir.absolutePath,
-                FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+                FileObserver.CREATE or FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
             ) {
                 override fun onEvent(event: Int, path: String?) {
                     if (path.isNullOrBlank()) return
                     val file = File(cameraDir, path)
                     if (!isCameraImage(file)) return
-                    handler.post { handleCompletedCameraFile(file) }
+                    handler.post { handleCameraFileEvent(file, event) }
                 }
             }.also { it.startWatching() }
         } catch (_: Exception) {
@@ -157,15 +161,39 @@ class CameraOverlayService : Service() {
     private fun isCameraImage(file: File): Boolean =
         file.extension.lowercase(Locale.ROOT) in setOf("jpg", "jpeg", "png", "webp", "heic", "heif", "dng")
 
-    private fun handleCompletedCameraFile(file: File) {
-        if (overlay != null || !file.isFile || file.length() <= 0L) return
-        val path = try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
-        val displayedPath = displayedFile?.let {
-            try { it.canonicalPath } catch (_: Exception) { it.absolutePath }
+    private fun filePath(file: File): String =
+        try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
+
+    private fun handleCameraFileEvent(file: File, event: Int) {
+        val path = filePath(file)
+        val isCompleteEvent = (event and (FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO)) != 0
+        if (isCompleteEvent) completedFilePaths.add(path)
+
+        val displayedPath = displayedFile?.let { filePath(it) }
+        if (path == displayedPath) {
+            if (isCompleteEvent && pendingSaveFile?.let { filePath(it) } == path) {
+                sourceReadyForSave = true
+                handler.post { continuePendingSave(file) }
+            }
+            return
         }
-        if (handledFilePaths.contains(path) || path == displayedPath) return
+        if (handledFilePaths.contains(path) || overlay != null) return
+
+        // CREATE arriva normalmente prima della scrittura completa: mostra subito
+        // il campo nome, ma non permette di copiare il file finché non è chiuso.
+        if (event and (FileObserver.CREATE or FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO) == 0) return
+        if (!file.exists()) return
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
+        sourceReadyForSave = isCompleteEvent && file.length() > 0L
         showNameOverlay(null, -1L, file)
+    }
+
+    private fun continuePendingSave(file: File) {
+        if (overlay == null || !saveInProgress || pendingSaveFile?.let { filePath(it) } != filePath(file)) return
+        if (!file.isFile || file.length() <= 0L) return
+        sourceReadyForSave = true
+        pendingSaveFile = null
+        savePhotoToArchive()
     }
 
     private fun createNotificationChannel() {
@@ -388,6 +416,9 @@ class CameraOverlayService : Service() {
     private fun showNameOverlay(uri: Uri?, id: Long, sourceFile: File? = null) {
         if (overlay != null || !android.provider.Settings.canDrawOverlays(this)) return
         saveInProgress = false
+        sourceReadyForSave = sourceFile?.let { completedFilePaths.contains(filePath(it)) } ?: true
+        pendingSaveFile = null
+        pendingSaveStartedAt = 0L
         photoUri = uri
         displayedFile = sourceFile
         displayedId = id
@@ -583,6 +614,13 @@ class CameraOverlayService : Service() {
 
     private fun savePhotoToArchive() {
         val sourceFile = displayedFile
+        if (sourceFile != null && !sourceReadyForSave) {
+            pendingSaveFile = sourceFile
+            if (pendingSaveStartedAt == 0L) pendingSaveStartedAt = System.currentTimeMillis()
+            saveButton?.text = "ATTENDI FOTO…"
+            waitForCameraFileClose(sourceFile)
+            return
+        }
         val uri = photoUri
         if (sourceFile == null && uri == null) return
         val requestedName = safeName(nameInput?.text?.toString().orEmpty())
@@ -639,6 +677,28 @@ class CameraOverlayService : Service() {
         }
     }
 
+    private fun waitForCameraFileClose(file: File) {
+        if (overlay == null || !saveInProgress || pendingSaveFile?.let { filePath(it) } != filePath(file)) return
+        if (completedFilePaths.contains(filePath(file)) && file.isFile && file.length() > 0L) {
+            sourceReadyForSave = true
+            pendingSaveFile = null
+            savePhotoToArchive()
+            return
+        }
+        if (System.currentTimeMillis() - pendingSaveStartedAt > 10000L) {
+            saveInProgress = false
+            pendingSaveFile = null
+            pendingSaveStartedAt = 0L
+            saveButton?.apply {
+                isEnabled = true
+                text = "SALVA IN FA"
+            }
+            Toast.makeText(this, "La fotocamera non ha ancora completato la foto. Riprova SALVA.", Toast.LENGTH_LONG).show()
+            return
+        }
+        handler.postDelayed({ waitForCameraFileClose(file) }, 80L)
+    }
+
     private fun dismissOverlay(markAsHandled: Boolean) {
         val handledId = displayedId
         val panel = overlay
@@ -663,6 +723,9 @@ class CameraOverlayService : Service() {
         nameInput = null
         saveButton = null
         saveInProgress = false
+        sourceReadyForSave = false
+        pendingSaveFile = null
+        pendingSaveStartedAt = 0L
         folderLabel = null
         photoUri = null
         if (markAsHandled && handledId >= 0L) lastSavedId = handledId
