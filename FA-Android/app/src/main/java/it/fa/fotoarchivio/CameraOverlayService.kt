@@ -37,6 +37,9 @@ class CameraOverlayService : Service() {
         const val EXTRA_START_TIME = "fa_start_time"
         private const val CHANNEL_ID = "fa_camera_overlay"
         private const val NOTIFICATION_ID = 7401
+        // Controlli più ravvicinati per mostrare prima il campo nome.
+        private const val PHOTO_CHANGE_DEBOUNCE_MS = 350L
+        private const val PHOTO_STABILITY_CHECK_MS = 350L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -106,7 +109,7 @@ class CameraOverlayService : Service() {
     private fun schedulePhotoCheck() {
         if (overlay != null) return
         handler.removeCallbacks(photoCheck)
-        handler.postDelayed(photoCheck, 1200L)
+        handler.postDelayed(photoCheck, PHOTO_CHANGE_DEBOUNCE_MS)
     }
 
     private val photoCheck = object : Runnable {
@@ -119,7 +122,7 @@ class CameraOverlayService : Service() {
                 candidateUri = uri
                 candidateSize = size
                 stableChecks = 0
-                handler.postDelayed(this, 900L)
+                handler.postDelayed(this, PHOTO_STABILITY_CHECK_MS)
                 return
             }
             if (size > 0L && size == candidateSize) stableChecks++ else stableChecks = 0
