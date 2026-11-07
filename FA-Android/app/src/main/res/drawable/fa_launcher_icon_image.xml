@@ -8,7 +8,7 @@
     <!-- Golden wooden cabinet backdrop -->
     <path android:fillColor="#4A2418" android:pathData="M0,0h108v108h-108z"/>
 
-    <!-- Keep the complete illustration inside the adaptive-icon safe area -->
+    <!-- Original warm wooden album-cabinet style, fitted to launcher safe area -->
     <group android:pivotX="54" android:pivotY="54" android:scaleX="0.58" android:scaleY="0.58">
     <path android:fillColor="#75401F" android:pathData="M0,0h108v14h-108z"/>
     <path android:fillColor="#A96B35" android:pathData="M0,13h108v3h-108z"/>
@@ -24,8 +24,8 @@
     <path android:fillColor="#F0CB82" android:pathData="M59,24h2v34h-2zM70,24h1v34h-1zM57,28h18v2h-18zM57,56h18v2h-18z"/>
     <path android:fillColor="#D9A85E" android:pathData="M12,38h13v2h-13zM34,39h16v2h-16zM59,40h15v2h-15z"/>
 
-    <!-- Vintage movie camera at upper right: slightly enlarged, with dimensional side and highlights -->
-    <group android:pivotX="89" android:pivotY="43" android:scaleX="1.14" android:scaleY="1.14">
+    <!-- Vintage movie camera, enlarged to match the still camera -->
+    <group android:pivotX="90" android:pivotY="43" android:scaleX="1.5" android:scaleY="0.9" android:translateX="-8" android:translateY="10">
     <path android:fillColor="#171513" android:pathData="M77,29l3,-3h22v23l-3,3h-22z"/>
     <path android:fillColor="#252321" android:pathData="M76,26h23q3,0 3,3v19q0,3 -3,3h-23z"/>
     <path android:fillColor="#B9A58A" android:pathData="M78,29h19v17h-19z"/>
@@ -39,9 +39,8 @@
     <path android:fillColor="#6D6252" android:pathData="M98,30h2v17h-2zM80,47h18v2h-18z"/>
     </group>
 
-    <!-- Main vintage still camera: slightly smaller, with bevels and raised lens -->
-    <group android:pivotX="45" android:pivotY="66" android:scaleX="0.92" android:scaleY="0.92">
-    <path android:fillColor="#100F0E" android:pathData="M15,51q0,-4 5,-4h8l5,-7h28l6,7h8q5,0 5,5v27q0,5 -5,5h-55q-5,0 -5,-5z"/>
+    <!-- Main vintage still camera, balanced in size with the movie camera -->
+    <group android:pivotX="45" android:pivotY="66" android:scaleX="0.72" android:scaleY="0.72">
     <path android:fillColor="#211F1D" android:pathData="M13,49q0,-4 5,-4h8l5,-7h28l6,7h8q5,0 5,5v27q0,5 -5,5h-55q-5,0 -5,-5z"/>
     <path android:fillColor="#D6C7AC" android:pathData="M17,49h12l5,-7h23l6,7h10v27h-56z"/>
     <path android:fillColor="#292724" android:pathData="M17,55h56v21h-56z"/>
@@ -56,11 +55,10 @@
     <path android:fillColor="#243F46" android:pathData="M45,60a9,9 0,1 0,0 18a9,9 0,1 0,0 -18z"/>
     <path android:fillColor="#A9B5A4" android:pathData="M39,64q5,-6 12,-1q-7,-2 -10,6z"/>
     <path android:fillColor="#E9D2A3" android:pathData="M19,52h5v2h-5zM65,52h5v2h-5z"/>
-    <!-- Raised top bevel, body side and lens rim reflections -->
+
     <path android:fillColor="#F0DEC0" android:pathData="M19,48h9l5,-7h27l5,7h7v2h-8l-5,-7h-25l-5,7h-10z"/>
     <path android:fillColor="#806044" android:pathData="M69,51h3v26h-3zM18,77h53v2h-53z"/>
     <path android:fillColor="#F2D18D" android:pathData="M34,54a15,15 0,0 1,22 0l-2,2a13,13 0,0 0,-18 0z"/>
-    <path android:fillColor="#101B20" android:pathData="M38,63q4,-8 12,-6q-7,0 -9,8z"/>
     </group>
 
     <!-- Shelf and film strip -->
