@@ -250,19 +250,23 @@ class CameraOverlayService : Service() {
                     val id = cursor.getLong(idColumn)
                     // Considera solo lo scatto più recente: dopo SALVA non riaprire
                     // finestre per fotografie precedenti della stessa sessione.
-                    if (id == lastSavedId || id == displayedId) continue
-                    val nameColumn = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
-                    if (nameColumn >= 0) {
-                        val name = cursor.getString(nameColumn).orEmpty()
-                        val directFile = File(
-                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
-                            "Camera/$name"
-                        )
-                        val directPath = try { directFile.canonicalPath } catch (_: Exception) { directFile.absolutePath }
-                        if (handledFilePaths.contains(directPath)) continue
+                    if (id != lastSavedId && id != displayedId) {
+                        val nameColumn = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
+                        var alreadyHandled = false
+                        if (nameColumn >= 0) {
+                            val name = cursor.getString(nameColumn).orEmpty()
+                            val directFile = File(
+                                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                                "Camera/$name"
+                            )
+                            val directPath = try { directFile.canonicalPath } catch (_: Exception) { directFile.absolutePath }
+                            alreadyHandled = handledFilePaths.contains(directPath)
+                        }
+                        if (!alreadyHandled) {
+                            val size = cursor.getLong(sizeColumn)
+                            return@use if (size > 0L) Uri.withAppendedPath(collection, id.toString()) to size else null
+                        }
                     }
-                    val size = cursor.getLong(sizeColumn)
-                    return@use if (size > 0L) Uri.withAppendedPath(collection, id.toString()) to size else null
                 }
                 null
             }
