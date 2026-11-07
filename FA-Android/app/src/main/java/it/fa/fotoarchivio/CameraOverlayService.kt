@@ -76,7 +76,7 @@ class CameraOverlayService : Service() {
 
     private val observer = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
-            schedulePhotoCheck()
+            schedulePhotoCheck(120L)
         }
     }
 
@@ -117,7 +117,7 @@ class CameraOverlayService : Service() {
         )
         // Avvia anche un controllo periodico: non dipendiamo esclusivamente
         // dalla notifica MediaStore, che su alcuni telefoni può arrivare in ritardo.
-        schedulePhotoCheck(1000L)
+        schedulePhotoCheck(250L)
         return START_NOT_STICKY
     }
 
@@ -142,7 +142,7 @@ class CameraOverlayService : Service() {
             .build()
     }
 
-    private fun schedulePhotoCheck(delayMillis: Long = 1200L) {
+    private fun schedulePhotoCheck(delayMillis: Long = 250L) {
         if (overlay != null) return
         handler.removeCallbacks(photoCheck)
         handler.postDelayed(photoCheck, delayMillis)
@@ -153,7 +153,7 @@ class CameraOverlayService : Service() {
             if (overlay != null) return
             val latest = findLatestCameraPhoto()
             if (latest == null) {
-                handler.postDelayed(this, 1000L)
+                handler.postDelayed(this, 250L)
                 return
             }
             val uri = latest.first
@@ -163,7 +163,7 @@ class CameraOverlayService : Service() {
                 candidateSize = size
                 stableChecks = 0
                 photoDateTakenMillis = getPhotoDateTaken(uri)
-                handler.postDelayed(this, 900L)
+                handler.postDelayed(this, 250L)
                 return
             }
             if (size > 0L && size == candidateSize) stableChecks++ else stableChecks = 0
@@ -172,7 +172,7 @@ class CameraOverlayService : Service() {
                 val id = uri.lastPathSegment?.toLongOrNull() ?: -1L
                 if (id != lastSavedId && id != displayedId) showNameOverlay(uri, id)
             } else {
-                handler.postDelayed(this, 900L)
+                handler.postDelayed(this, 250L)
             }
         }
     }
@@ -425,7 +425,7 @@ class CameraOverlayService : Service() {
         val saved = prefs.getStringSet("folders_$targetCategory", setOf("Generale"))
             ?.toMutableSet() ?: mutableSetOf("Generale")
         val root = File(Environment.getExternalStorageDirectory(),
-            "Pictures/FA archivio principale/$targetCategory")
+            "Pictures/FotoArchivio/$targetCategory")
         if (root.exists()) {
             root.walkTopDown().filter { it.isDirectory && it != root }.forEach { dir ->
                 val relative = dir.relativeTo(root).path.replace(File.separatorChar, '/').trim('/')
@@ -483,7 +483,7 @@ class CameraOverlayService : Service() {
         val segments = folder.trim('/').split('/').filter { it.isNotBlank() }.map { safeName(it) }
         val destinationDir = File(
             Environment.getExternalStorageDirectory(),
-            "Pictures/FA archivio principale/$category/${segments.joinToString("/")}"
+            "Pictures/FotoArchivio/$category/${segments.joinToString("/")}"
         )
         val destination = File(destinationDir, "$baseName.$extension")
         try {
@@ -533,7 +533,7 @@ class CameraOverlayService : Service() {
         candidateUri = null
         candidateSize = -1L
         stableChecks = 0
-        if (markAsHandled) schedulePhotoCheck(350L)
+        if (markAsHandled) schedulePhotoCheck(250L)
     }
 
     override fun onDestroy() {
