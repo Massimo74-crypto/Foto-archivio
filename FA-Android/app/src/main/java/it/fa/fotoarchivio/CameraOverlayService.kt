@@ -78,7 +78,7 @@ class CameraOverlayService : Service() {
 
     private val observer = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
-            schedulePhotoCheck(120L)
+            schedulePhotoCheck(60L)
         }
     }
 
@@ -119,7 +119,7 @@ class CameraOverlayService : Service() {
         )
         // Avvia anche un controllo periodico: non dipendiamo esclusivamente
         // dalla notifica MediaStore, che su alcuni telefoni può arrivare in ritardo.
-        schedulePhotoCheck(250L)
+        schedulePhotoCheck(100L)
         return START_NOT_STICKY
     }
 
@@ -144,7 +144,7 @@ class CameraOverlayService : Service() {
             .build()
     }
 
-    private fun schedulePhotoCheck(delayMillis: Long = 250L) {
+    private fun schedulePhotoCheck(delayMillis: Long = 100L) {
         if (overlay != null) return
         handler.removeCallbacks(photoCheck)
         handler.postDelayed(photoCheck, delayMillis)
@@ -155,7 +155,7 @@ class CameraOverlayService : Service() {
             if (overlay != null) return
             val latest = findLatestCameraPhoto()
             if (latest == null) {
-                handler.postDelayed(this, 250L)
+                handler.postDelayed(this, 100L)
                 return
             }
             val uri = latest.first
