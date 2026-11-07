@@ -90,7 +90,9 @@ class CameraOverlayService : Service() {
         // Mantiene invariato il tipo di servizio già collaudato nella 0.4.1.
         // La raccolta GPS è facoltativa e non deve impedire l'avvio della sovrapposizione.
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            val serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                (if (hasAnyLocationPermission()) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
+            startForeground(NOTIFICATION_ID, notification, serviceTypes)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -101,9 +103,8 @@ class CameraOverlayService : Service() {
         folder = intent?.getStringExtra(EXTRA_FOLDER) ?: "Generale"
         sessionStartSeconds = (intent?.getLongExtra(EXTRA_START_TIME, System.currentTimeMillis()) 
             ?: System.currentTimeMillis()) / 1000L
-        // Avvia il fix GPS all'inizio della sessione, prima che l'utente scatti.
-        // Mantiene gli aggiornamenti attivi durante l'uso della fotocamera.
-        startLocationCapture()
+        // Conserva il fix eventualmente acquisito dall'attività prima dell'avvio
+        // e poi avvia gli aggiornamenti continui nel servizio.
         if (intent?.hasExtra(EXTRA_GPS_LATITUDE) == true &&
             intent.hasExtra(EXTRA_GPS_LONGITUDE) && intent.hasExtra(EXTRA_GPS_TIME)) {
             candidateLocation = Location("FA-current-fix").apply {
@@ -114,6 +115,7 @@ class CameraOverlayService : Service() {
                 if (intent.hasExtra(EXTRA_GPS_ACCURACY)) accuracy = intent.getFloatExtra(EXTRA_GPS_ACCURACY, 0f)
             }
         }
+        startLocationCapture()
         contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
         )
@@ -228,7 +230,6 @@ class CameraOverlayService : Service() {
 
     private fun startLocationCapture() {
         stopLocationUpdates()
-        candidateLocation = null
         if (!hasAnyLocationPermission()) return
         try {
             val manager = getSystemService(LOCATION_SERVICE) as LocationManager
