@@ -119,7 +119,7 @@ class CameraOverlayService : Service() {
         )
         // Avvia anche un controllo periodico: non dipendiamo esclusivamente
         // dalla notifica MediaStore, che su alcuni telefoni può arrivare in ritardo.
-        schedulePhotoCheck(100L)
+        schedulePhotoCheck(50L)
         return START_NOT_STICKY
     }
 
@@ -144,7 +144,7 @@ class CameraOverlayService : Service() {
             .build()
     }
 
-    private fun schedulePhotoCheck(delayMillis: Long = 100L) {
+    private fun schedulePhotoCheck(delayMillis: Long = 50L) {
         if (overlay != null) return
         handler.removeCallbacks(photoCheck)
         handler.postDelayed(photoCheck, delayMillis)
@@ -155,7 +155,7 @@ class CameraOverlayService : Service() {
             if (overlay != null) return
             val latest = findLatestCameraPhoto()
             if (latest == null) {
-                handler.postDelayed(this, 100L)
+                handler.postDelayed(this, 50L)
                 return
             }
             val uri = latest.first
@@ -165,7 +165,7 @@ class CameraOverlayService : Service() {
                 candidateSize = size
                 stableChecks = 0
                 photoDateTakenMillis = getPhotoDateTaken(uri)
-                handler.postDelayed(this, 250L)
+                handler.postDelayed(this, 60L)
                 return
             }
             if (size > 0L && size == candidateSize) stableChecks++ else stableChecks = 0
@@ -253,9 +253,14 @@ class CameraOverlayService : Service() {
                 }
             }
             locationListener = listener
-            // Non avvia aggiornamenti continui in background: il fix recente già
-            // disponibile viene acquisito mentre FA è ancora in primo piano.
-            // Così il GPS non può interferire con il servizio overlay della fotocamera.
+            // Aggiornamenti GPS asincroni durante la sessione: non bloccano mai
+            // l'apertura della fotocamera né il rilevamento dello scatto.
+            manager.getProviders(true).forEach { provider ->
+                try {
+                    manager.requestLocationUpdates(provider, 1000L, 0f, listener, Looper.getMainLooper())
+                } catch (_: SecurityException) { }
+                  catch (_: IllegalArgumentException) { }
+            }
 
         } catch (_: Exception) {
             stopLocationUpdates()
