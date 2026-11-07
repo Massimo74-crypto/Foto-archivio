@@ -39,6 +39,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// GPS metadata test build 0.4.3; stable 0.4.1 branch remains untouched.
 class MainActivity : ComponentActivity() {
     private var activeCategory = "PERSONALE"
     private var pendingPhoto: Uri? = null
