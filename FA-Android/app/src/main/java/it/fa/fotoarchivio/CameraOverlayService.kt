@@ -24,7 +24,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import android.content.ContentObserver
+import android.database.ContentObserver
 import android.content.pm.ServiceInfo
 import java.io.File
 import java.io.FileOutputStream
@@ -267,7 +267,7 @@ class CameraOverlayService : Service() {
         val sourceName = try {
             contentResolver.query(uri, arrayOf(MediaStore.Images.Media.DISPLAY_NAME), null, null, null)
                 ?.use { if (it.moveToFirst()) it.getString(0) else null }
-        } catch (_: Exception) { null } } ?: "foto.jpg"
+        } catch (_: Exception) { null } ?: "foto.jpg"
         val extension = sourceName.substringAfterLast('.', "jpg")
             .lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "").ifBlank { "jpg" }
         val segments = folder.trim('/').split('/').filter { it.isNotBlank() }.map { safeName(it) }
