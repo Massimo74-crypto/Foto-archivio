@@ -209,8 +209,7 @@ class CameraOverlayService : Service() {
                 candidateUri = uri
                 candidateSize = size
                 stableChecks = 0
-                photoDateTakenMillis = if (sourceFile != null) sourceFile.lastModified().takeIf { it > 0L }
-            else uri?.let { getPhotoDateTaken(it) }
+                photoDateTakenMillis = getPhotoDateTaken(uri)
                 handler.postDelayed(this, 60L)
                 return
             }
