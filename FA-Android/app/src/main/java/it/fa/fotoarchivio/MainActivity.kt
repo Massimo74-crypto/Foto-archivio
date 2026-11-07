@@ -1,6 +1,8 @@
 package it.fa.fotoarchivio
 
+import android.Manifest
 import android.app.AlertDialog
+import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.LayerDrawable
 import android.content.ContentValues
@@ -73,6 +75,13 @@ class MainActivity : ComponentActivity() {
             toast("Registrazione annullata")
             showHome()
         }
+    }
+
+    private val locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (!granted) toast("Posizione non autorizzata: FA salverà comunque la foto, ma senza nuove coordinate GPS")
+        startNativeCameraSession()
     }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -321,7 +330,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (waitingForOverlayPermission) {
             waitingForOverlayPermission = false
-            if (Settings.canDrawOverlays(this)) startNativeCameraSession()
+            if (Settings.canDrawOverlays(this)) startCameraWithLocationPermission()
             else toast("Senza questa autorizzazione FA non può mostrare il nome sopra la fotocamera")
         } else if (cameraSessionLaunched) {
             cameraSessionLaunched = false
@@ -343,7 +352,20 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        startNativeCameraSession()
+        startCameraWithLocationPermission()
+    }
+
+    private fun startCameraWithLocationPermission() {
+        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) {
+            startNativeCameraSession()
+        } else {
+            locationPermissionLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        }
     }
 
     private fun startNativeCameraSession() {
