@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
@@ -1048,8 +1049,11 @@ class MainActivity : ComponentActivity() {
 
     private fun openMediaItem(item: PhotoItem) {
         try {
+            val extension = item.file.extension.lowercase(Locale.ROOT)
+            val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                ?: if (item.isVideo) "video/*" else "image/*"
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(item.uri, if (item.isVideo) "video/*" else "image/*")
+                setDataAndType(item.uri, mimeType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(intent)
