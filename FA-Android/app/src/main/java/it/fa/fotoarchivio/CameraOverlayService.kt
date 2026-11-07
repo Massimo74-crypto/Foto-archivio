@@ -66,6 +66,8 @@ class CameraOverlayService : Service() {
     private var locationManager: LocationManager? = null
     private var locationListener: LocationListener? = null
     private var photoDateTakenMillis: Long? = null
+    private var folderLabel: TextView? = null
+    private var gpsDiagnostic: String = "GPS non ancora verificato"
 
     private val observer = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
@@ -253,7 +255,9 @@ class CameraOverlayService : Service() {
                 exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, formatter.format(Date(takenAt)))
                 exif.setAttribute(ExifInterface.TAG_DATETIME, formatter.format(Date(takenAt)))
             }
-            val location = candidateLocation?.takeIf { System.currentTimeMillis() - it.time <= 30_000L }
+            val location = candidateLocation?.takeIf {
+                System.currentTimeMillis() - it.time in 0..120_000L
+            }
             if (location != null) {
                 exif.setLatLong(location.latitude, location.longitude)
                 if (location.hasAltitude()) {
@@ -268,8 +272,23 @@ class CameraOverlayService : Service() {
                     utc.get(Calendar.HOUR_OF_DAY), utc.get(Calendar.MINUTE), utc.get(Calendar.SECOND)))
             }
             exif.saveAttributes()
-            location != null
-        } catch (_: Exception) {
+            val check = ExifInterface(file).latLong
+            if (check != null) {
+                gpsDiagnostic = if (location != null) {
+                    "GPS scritto e verificato • \${"%.6f".format(Locale.US, check[0])}, \${"%.6f".format(Locale.US, check[1])}" +
+                        (if (location.hasAccuracy()) " • ±\${location.accuracy.toInt()} m" else "")
+                } else {
+                    "GPS già presente nell'originale • \${"%.6f".format(Locale.US, check[0])}, \${"%.6f".format(Locale.US, check[1])}"
+                }
+                true
+            } else {
+                val age = candidateLocation?.let { ((System.currentTimeMillis() - it.time).coerceAtLeast(0L) / 1000L) }
+                gpsDiagnostic = if (age != null) "GPS non scritto: ultimo fix di \${age}s" else
+                    "GPS non scritto: nessun fix disponibile"
+                false
+            }
+        } catch (e: Exception) {
+            gpsDiagnostic = "Errore EXIF: \${e.localizedMessage ?: e.javaClass.simpleName}"
             false
         }
     }
@@ -291,10 +310,18 @@ class CameraOverlayService : Service() {
             }
             elevation = dp(10).toFloat()
         }
-        panel.addView(TextView(this).apply {
+        val destinationLabel = TextView(this).apply {
             text = "FOTO SCATTATA  •  $category / $folder"
             textSize = 14f
             setTextColor(0xFFF4EBDD.toInt())
+            setPadding(0, 0, 0, dp(6))
+        }
+        folderLabel = destinationLabel
+        panel.addView(destinationLabel)
+        panel.addView(TextView(this).apply {
+            text = currentGpsStatus()
+            textSize = 12f
+            setTextColor(0xFFD8D5D0.toInt())
             setPadding(0, 0, 0, dp(6))
         })
         val input = EditText(this).apply {
@@ -319,6 +346,11 @@ class CameraOverlayService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
+        val changeFolder = Button(this).apply {
+            text = "CAMBIA CARTELLA"
+            isAllCaps = false
+            setOnClickListener { showFolderPicker() }
+        }
         val skip = Button(this).apply {
             text = "SALTA"
             isAllCaps = false
@@ -329,7 +361,8 @@ class CameraOverlayService : Service() {
             isAllCaps = false
             setOnClickListener { savePhotoToArchive() }
         }
-        actions.addView(skip, LinearLayout.LayoutParams(0, dp(48), 1f))
+        actions.addView(changeFolder, LinearLayout.LayoutParams(0, dp(48), 1.15f))
+        actions.addView(skip, LinearLayout.LayoutParams(0, dp(48), 0.75f))
         actions.addView(save, LinearLayout.LayoutParams(0, dp(48), 1f))
         panel.addView(actions)
 
@@ -357,6 +390,52 @@ class CameraOverlayService : Service() {
             photoUri = null
             displayedId = -1L
         }
+    }
+
+    private fun currentGpsStatus(): String {
+        val location = candidateLocation ?: return "GPS: nessuna posizione recente disponibile"
+        val ageSeconds = ((System.currentTimeMillis() - location.time).coerceAtLeast(0L)) / 1000L
+        return "GPS rilevato • precisione ±\${location.accuracy.toInt()} m • \${ageSeconds}s fa"
+    }
+
+    private fun availableFolders(targetCategory: String): List<String> {
+        val prefs = getSharedPreferences("fa_settings", Context.MODE_PRIVATE)
+        val saved = prefs.getStringSet("folders_$targetCategory", setOf("Generale"))
+            ?.toMutableSet() ?: mutableSetOf("Generale")
+        val root = File(Environment.getExternalStorageDirectory(),
+            "Pictures/FA archivio principale/$targetCategory")
+        if (root.exists()) {
+            root.walkTopDown().filter { it.isDirectory && it != root }.forEach { dir ->
+                val relative = dir.relativeTo(root).path.replace(File.separatorChar, '/').trim('/')
+                if (relative.isNotBlank() && !relative.startsWith(".FA_TEMP")) saved.add(relative)
+            }
+        }
+        if (saved.isEmpty()) saved.add("Generale")
+        return saved.sorted()
+    }
+
+    private fun showFolderPicker() {
+        val choices = mutableListOf<Pair<String, String>>()
+        listOf("PERSONALE", "LAVORO").forEach { cat ->
+            availableFolders(cat).forEach { path -> choices.add(cat to path) }
+        }
+        val labels = choices.map { (cat, path) ->
+            (if (cat == category) "✓ " else "") + "$cat  /  $path"
+        }.toTypedArray()
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Scegli la cartella di destinazione")
+            .setItems(labels) { _, which ->
+                category = choices[which].first
+                folder = choices[which].second
+                getSharedPreferences("fa_settings", Context.MODE_PRIVATE).edit()
+                    .putString("active_category", category)
+                    .putString("last_folder_$category", folder)
+                    .apply()
+                folderLabel?.text = "FOTO SCATTATA  •  $category / $folder"
+                Toast.makeText(this, "Destinazione: $category / $folder", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
     }
 
     private fun safeName(value: String): String =
@@ -398,9 +477,9 @@ class CameraOverlayService : Service() {
                 destination.delete()
                 throw IllegalStateException("Copia non riuscita")
             }
-            val gpsSaved = writePhotoMetadata(destination)
-            val message = if (gpsSaved) "Copia salvata in FA/$category/$folder • GPS registrato" else "Copia salvata in FA/$category/$folder • posizione non disponibile"
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            writePhotoMetadata(destination)
+            val message = "Copia salvata in FA/$category/$folder\n$gpsDiagnostic"
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             dismissOverlay(markAsHandled = true)
         } catch (e: Exception) {
             Toast.makeText(this, "Errore: ${e.localizedMessage ?: "salvataggio non riuscito"}", Toast.LENGTH_LONG).show()
@@ -420,6 +499,7 @@ class CameraOverlayService : Service() {
         }
         overlay = null
         nameInput = null
+        folderLabel = null
         photoUri = null
         if (markAsHandled) lastSavedId = displayedId
         displayedId = -1L
