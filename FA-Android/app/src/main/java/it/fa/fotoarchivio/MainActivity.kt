@@ -314,20 +314,62 @@ class MainActivity : ComponentActivity() {
         setContentView(root)
     }
 
+    private var waitingForOverlayPermission = false
+    private var cameraSessionLaunched = false
+
+    override fun onResume() {
+        super.onResume()
+        if (waitingForOverlayPermission) {
+            waitingForOverlayPermission = false
+            if (Settings.canDrawOverlays(this)) startNativeCameraSession()
+            else toast("Senza questa autorizzazione FA non può mostrare il nome sopra la fotocamera")
+        } else if (cameraSessionLaunched) {
+            cameraSessionLaunched = false
+            stopService(Intent(this, CameraOverlayService::class.java))
+        }
+    }
+
     private fun launchCamera() {
+        if (!Settings.canDrawOverlays(this)) {
+            waitingForOverlayPermission = true
+            try {
+                startActivity(Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                ))
+            } catch (e: Exception) {
+                waitingForOverlayPermission = false
+                toast("Impossibile aprire l'autorizzazione per la sovrapposizione")
+            }
+            return
+        }
+        startNativeCameraSession()
+    }
+
+    private fun startNativeCameraSession() {
         try {
             prepareArchiveFolders()
-            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file = File(File(archiveRoot(false), ".FA_TEMP"), "FA_TEMP_$stamp.jpg")
-            pendingPhotoFile = file
-            pendingPhoto = archiveFileUri(file)
-            cameraLauncher.launch(pendingPhoto!!)
+            val folder = prefs.getString(lastFolderKey(activeCategory), "Generale") ?: "Generale"
+            val serviceIntent = Intent(this, CameraOverlayService::class.java).apply {
+                putExtra(CameraOverlayService.EXTRA_CATEGORY, activeCategory)
+                putExtra(CameraOverlayService.EXTRA_FOLDER, folder)
+                putExtra(CameraOverlayService.EXTRA_START_TIME, System.currentTimeMillis())
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+            else startService(serviceIntent)
+
+            val cameraIntent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+            if (cameraIntent.resolveActivity(packageManager) == null) {
+                stopService(Intent(this, CameraOverlayService::class.java))
+                toast("Non trovo la fotocamera di sistema")
+                return
+            }
+            cameraSessionLaunched = true
+            startActivity(cameraIntent)
         } catch (e: Exception) {
-            pendingPhotoFile?.delete()
-            pendingPhotoFile = null
-            pendingPhoto = null
-            toast("Fotocamera non disponibile: ${e.localizedMessage ?: "errore"}")
-            showHome()
+            cameraSessionLaunched = false
+            stopService(Intent(this, CameraOverlayService::class.java))
+            toast("Avvio fotocamera non riuscito: ${e.localizedMessage ?: "errore"}")
         }
     }
 
