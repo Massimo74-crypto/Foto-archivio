@@ -337,6 +337,10 @@ class CameraOverlayService : Service() {
             }
             elevation = dp(10).toFloat()
         }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val destinationLabel = TextView(this).apply {
             text = "FOTO SCATTATA  •  $category / $folder"
             textSize = 14f
@@ -344,7 +348,16 @@ class CameraOverlayService : Service() {
             setPadding(0, 0, 0, dp(6))
         }
         folderLabel = destinationLabel
-        panel.addView(destinationLabel)
+        header.addView(destinationLabel, LinearLayout.LayoutParams(0, dp(44), 1f))
+        val close = Button(this).apply {
+            text = "✕"
+            contentDescription = "Chiudi senza salvare"
+            isAllCaps = false
+            minWidth = dp(44)
+            setOnClickListener { dismissOverlay(markAsHandled = true) }
+        }
+        header.addView(close, LinearLayout.LayoutParams(dp(48), dp(44)))
+        panel.addView(header)
         panel.addView(TextView(this).apply {
             text = currentGpsStatus()
             textSize = 12f
@@ -391,11 +404,6 @@ class CameraOverlayService : Service() {
             isAllCaps = false
             setOnClickListener { showFolderPicker() }
         }
-        val skip = Button(this).apply {
-            text = "SALTA"
-            isAllCaps = false
-            setOnClickListener { dismissOverlay(markAsHandled = true) }
-        }
         val save = Button(this).apply {
             text = "SALVA IN FA"
             isAllCaps = false
@@ -409,7 +417,6 @@ class CameraOverlayService : Service() {
         }
         saveButton = save
         actions.addView(changeFolder, LinearLayout.LayoutParams(0, dp(48), 1.15f))
-        actions.addView(skip, LinearLayout.LayoutParams(0, dp(48), 0.75f))
         actions.addView(save, LinearLayout.LayoutParams(0, dp(48), 1f))
         panel.addView(actions)
 
@@ -502,16 +509,15 @@ class CameraOverlayService : Service() {
         value.trim().replace(Regex("[\\\\/:*?<>|\"\\n\\r]"), "_")
             .trim('.').ifBlank { "" }
 
+    private fun nextAutomaticPhotoName(directory: File, extension: String): String {
+        var number = 1
+        while (File(directory, "foto$number.$extension").exists()) number++
+        return "foto$number"
+    }
+
     private fun savePhotoToArchive() {
         val uri = photoUri ?: return
-        val rawName = nameInput?.text?.toString().orEmpty()
-        val baseName = safeName(rawName)
-        if (baseName.isBlank()) {
-            nameInput?.error = "Inserisci un nome"
-            saveInProgress = false
-            saveButton?.isEnabled = true
-            return
-        }
+        val requestedName = safeName(nameInput?.text?.toString().orEmpty())
         val sourceName = try {
             contentResolver.query(uri, arrayOf(MediaStore.Images.Media.DISPLAY_NAME), null, null, null)
                 ?.use { if (it.moveToFirst()) it.getString(0) else null }
@@ -523,6 +529,9 @@ class CameraOverlayService : Service() {
             Environment.getExternalStorageDirectory(),
             "Pictures/FotoArchivio/$category/${segments.joinToString("/")}"
         )
+        val baseName = if (requestedName.isBlank()) {
+            nextAutomaticPhotoName(destinationDir, extension)
+        } else requestedName
         val destination = File(destinationDir, "$baseName.$extension")
         try {
             destinationDir.mkdirs()
@@ -542,7 +551,7 @@ class CameraOverlayService : Service() {
                 throw IllegalStateException("Copia non riuscita")
             }
             writePhotoMetadata(destination)
-            val message = "Copia salvata in FA/$category/$folder\n$gpsDiagnostic"
+            val message = "Salvata come $baseName.$extension in FA/$category/$folder\n$gpsDiagnostic"
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             dismissOverlay(markAsHandled = true)
         } catch (e: Exception) {
