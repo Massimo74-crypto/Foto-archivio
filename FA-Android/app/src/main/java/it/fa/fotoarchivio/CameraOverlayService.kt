@@ -275,20 +275,20 @@ class CameraOverlayService : Service() {
             val check = ExifInterface(file).latLong
             if (check != null) {
                 gpsDiagnostic = if (location != null) {
-                    "GPS scritto e verificato • \${"%.6f".format(Locale.US, check[0])}, \${"%.6f".format(Locale.US, check[1])}" +
-                        (if (location.hasAccuracy()) " • ±\${location.accuracy.toInt()} m" else "")
+                    "GPS scritto e verificato • ${"%.6f".format(Locale.US, check[0])}, ${"%.6f".format(Locale.US, check[1])}" +
+                        (if (location.hasAccuracy()) " • ±${location.accuracy.toInt()} m" else "")
                 } else {
-                    "GPS già presente nell'originale • \${"%.6f".format(Locale.US, check[0])}, \${"%.6f".format(Locale.US, check[1])}"
+                    "GPS già presente nell'originale • ${"%.6f".format(Locale.US, check[0])}, ${"%.6f".format(Locale.US, check[1])}"
                 }
                 true
             } else {
                 val age = candidateLocation?.let { ((System.currentTimeMillis() - it.time).coerceAtLeast(0L) / 1000L) }
-                gpsDiagnostic = if (age != null) "GPS non scritto: ultimo fix di \${age}s" else
+                gpsDiagnostic = if (age != null) "GPS non scritto: ultimo fix di ${age}s" else
                     "GPS non scritto: nessun fix disponibile"
                 false
             }
         } catch (e: Exception) {
-            gpsDiagnostic = "Errore EXIF: \${e.localizedMessage ?: e.javaClass.simpleName}"
+            gpsDiagnostic = "Errore EXIF: ${e.localizedMessage ?: e.javaClass.simpleName}"
             false
         }
     }
@@ -395,7 +395,7 @@ class CameraOverlayService : Service() {
     private fun currentGpsStatus(): String {
         val location = candidateLocation ?: return "GPS: nessuna posizione recente disponibile"
         val ageSeconds = ((System.currentTimeMillis() - location.time).coerceAtLeast(0L)) / 1000L
-        return "GPS rilevato • precisione ±\${location.accuracy.toInt()} m • \${ageSeconds}s fa"
+        return "GPS rilevato • precisione ±${location.accuracy.toInt()} m • ${ageSeconds}s fa"
     }
 
     private fun availableFolders(targetCategory: String): List<String> {
