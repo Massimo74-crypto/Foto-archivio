@@ -179,7 +179,7 @@ class CameraOverlayService : Service() {
             if (overlay != null || handledFilePaths.contains(path) || !file.exists()) return@Runnable
             sourceReadyForSave = completedFilePaths.contains(path) && file.length() > 0L
             photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
-            showNameOverlay(null, -1L, file)
+            showNameOverlay(file)
         }
         pendingPopupRunnable = show
         handler.postDelayed(show, 500L)
@@ -637,6 +637,9 @@ class CameraOverlayService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Chiudendo FA dal selettore delle app recenti, rimuove il popup
         // e arresta il servizio che lo mantiene visibile.
+        pendingPopupRunnable?.let { handler.removeCallbacks(it) }
+        pendingPopupRunnable = null
+        pendingPopupFile = null
         dismissOverlay(markAsHandled = false)
         stopLocationUpdates()
         stopForeground(STOP_FOREGROUND_REMOVE)
