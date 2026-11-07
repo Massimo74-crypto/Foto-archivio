@@ -146,18 +146,89 @@ class MainActivity : ComponentActivity() {
 
     private fun archiveRoot(isVideo: Boolean): File {
         val top = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-        return File(Environment.getExternalStorageDirectory(), "$top/FA archivio principale")
+        return File(Environment.getExternalStorageDirectory(), "$top/FotoArchivio")
     }
 
     private fun prepareArchiveFolders() {
         listOf(false, true).forEach { isVideo ->
             val root = archiveRoot(isVideo)
             root.mkdirs()
+            migrateLegacyArchive(isVideo)
             val marker = File(root, ".nomedia")
             if (!marker.exists()) marker.createNewFile()
             listOf("PERSONALE", "LAVORO", ".FA_TEMP").forEach { File(root, it).mkdirs() }
             listOf("PERSONALE", "LAVORO").forEach { File(root, "$it/Generale").mkdirs() }
         }
+    }
+
+    /**
+     * Unifica i vecchi archivi nella cartella pubblica FotoArchivio.
+     * Ogni file viene copiato e verificato prima di rimuovere la sorgente.
+     * In caso di omonimia non sovrascrive: crea un nome "recuperato".
+     */
+    private fun migrateLegacyArchive(isVideo: Boolean) {
+        val top = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+        val storage = Environment.getExternalStorageDirectory()
+        val legacyNames = mutableListOf("FA archivio principale")
+        val shortLegacy = File(storage, "$top/FA")
+        if (shortLegacy.isDirectory &&
+            (File(shortLegacy, "PERSONALE").isDirectory || File(shortLegacy, "LAVORO").isDirectory)) {
+            legacyNames.add("FA")
+        }
+        legacyNames.forEach { legacyName ->
+            val legacy = File(storage, "$top/$legacyName")
+            if (!legacy.isDirectory || legacy.canonicalFile == archiveRoot(isVideo).canonicalFile) return@forEach
+            mergeLegacyNode(legacy, archiveRoot(isVideo))
+            removeEmptyLegacyDirectories(legacy)
+        }
+    }
+
+    private fun mergeLegacyNode(source: File, destination: File) {
+        try {
+            var target = destination
+            if (source.isDirectory) {
+                if (target.exists() && !target.isDirectory) {
+                    target = uniqueLegacyTarget(target.parentFile ?: return, target.name)
+                }
+                if (!target.exists() && !target.mkdirs()) return
+                source.listFiles()?.forEach { child ->
+                    var childTarget = File(target, child.name)
+                    if (child.isFile && childTarget.exists()) childTarget = uniqueLegacyTarget(target, child.name)
+                    mergeLegacyNode(child, childTarget)
+                }
+                if (source.listFiles()?.isEmpty() == true) source.delete()
+            } else {
+                if (target.exists()) target = uniqueLegacyTarget(target.parentFile ?: return, target.name)
+                target.parentFile?.mkdirs()
+                source.inputStream().use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (target.exists() && target.length() == source.length()) source.delete()
+                else target.delete()
+            }
+        } catch (_: Exception) {
+            // Se il trasferimento non riesce, la sorgente resta intatta.
+        }
+    }
+
+    private fun uniqueLegacyTarget(parent: File, originalName: String): File {
+        val dot = originalName.lastIndexOf('.')
+        val stem = if (dot > 0) originalName.substring(0, dot) else originalName
+        val ext = if (dot > 0) originalName.substring(dot) else ""
+        var index = 1
+        var candidate = File(parent, "$stem (recuperato $index)$ext")
+        while (candidate.exists()) {
+            index++
+            candidate = File(parent, "$stem (recuperato $index)$ext")
+        }
+        return candidate
+    }
+
+    private fun removeEmptyLegacyDirectories(directory: File) {
+        try {
+            directory.listFiles()?.filter { it.isDirectory }?.forEach { removeEmptyLegacyDirectories(it) }
+            if (directory.isDirectory && directory.listFiles()?.isEmpty() == true) directory.delete()
+        } catch (_: Exception) { }
     }
 
     private fun archiveFileUri(file: File): Uri =
@@ -803,8 +874,8 @@ class MainActivity : ComponentActivity() {
                 .forEach { file ->
                     val rootName = if (isVideo) "Movies" else "Pictures"
                     val relative = file.relativeTo(Environment.getExternalStorageDirectory()).path.replace(File.separatorChar, '/')
-                    if (relative.startsWith("$rootName/FA archivio principale/PERSONALE/") ||
-                        relative.startsWith("$rootName/FA archivio principale/LAVORO/")) {
+                    if (relative.startsWith("$rootName/FotoArchivio/PERSONALE/") ||
+                        relative.startsWith("$rootName/FotoArchivio/LAVORO/")) {
                         try {
                             result.add(PhotoItem(file, archiveFileUri(file), file.name, "/$relative", isVideo))
                         } catch (_: Exception) { }
@@ -815,11 +886,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isInCategory(path: String, category: String): Boolean =
-        path.trimStart('/').startsWith("Pictures/FA archivio principale/$category/") || path.trimStart('/').startsWith("Movies/FA archivio principale/$category/")
+        path.trimStart('/').startsWith("Pictures/FotoArchivio/$category/") || path.trimStart('/').startsWith("Movies/FotoArchivio/$category/")
 
     private fun categoryFolderPath(item: PhotoItem, category: String, folder: String): String {
         val root = if (item.isVideo) "Movies" else "Pictures"
-        return "$root/FA archivio principale/$category/$folder/"
+        return "$root/FotoArchivio/$category/$folder/"
     }
 
     private fun showFileManager() {
@@ -848,7 +919,7 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("COLLEGA AL PC VIA USB") {
             AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
-                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA archivio principale e i video in Movies → FA archivio principale: copia PERSONALE e LAVORO da entrambe le posizioni.")
+                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FotoArchivio e i video in Movies → FotoArchivio: copia PERSONALE e LAVORO da entrambe le posizioni.")
                 .setPositiveButton("OK", null).show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("INDIETRO") { showHome() }, LinearLayout.LayoutParams(-1, dp(48)))
@@ -940,12 +1011,12 @@ class MainActivity : ComponentActivity() {
         val allItems = listPhotos().filter { isInCategory(it.path, explorerCategory) }
         val exactRelative = current.trim('/')
         val photos = allItems.filter {
-            val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
+            val relative = it.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
             val parentFolder = relative.substringBeforeLast('/', "")
             parentFolder == exactRelative
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
         val descendantCount = allItems.count {
-            val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
+            val relative = it.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
             if (exactRelative.isBlank()) relative.isNotBlank()
             else relative.startsWith(exactRelative + "/")
         }
@@ -962,7 +1033,7 @@ class MainActivity : ComponentActivity() {
         children.forEach { child ->
             val fullPath = if (current.isBlank()) child else current + "/" + child
             val count = allItems.count {
-                val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
+                val relative = it.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
                 relative == fullPath || relative.startsWith(fullPath + "/")
             }
             val row = LinearLayout(this).apply {
@@ -1126,7 +1197,7 @@ class MainActivity : ComponentActivity() {
         val hasMedia = listPhotos().any { item ->
             if (!isInCategory(item.path, explorerCategory)) false
             else {
-                val relative = item.path.substringAfter("/FA archivio principale/" + explorerCategory, "").trim('/')
+                val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory, "").trim('/')
                 relative == path || relative.startsWith(path + "/")
             }
         }
@@ -1287,7 +1358,7 @@ class MainActivity : ComponentActivity() {
                     1 -> exportZip(all.filter { isInCategory(it.path, "PERSONALE") }, "FA-PERSONALE")
                     2 -> exportZip(all.filter { isInCategory(it.path, "LAVORO") }, "FA-LAVORO")
                     3 -> AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
-                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA archivio principale e i video in Movies → FA archivio principale; copia PERSONALE e LAVORO da entrambe le posizioni.")
+                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FotoArchivio e i video in Movies → FotoArchivio; copia PERSONALE e LAVORO da entrambe le posizioni.")
                         .setPositiveButton("OK", null).show()
                 }
             }.show()
@@ -1305,7 +1376,7 @@ class MainActivity : ComponentActivity() {
             val zipUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (zipUri == null) { toast("Non riesco a creare il file ZIP"); return }
             val entries = items.map { photo ->
-                Triple(photo.uri, photo.path.substringAfter("/FA archivio principale/").trimEnd('/'), photo.name)
+                Triple(photo.uri, photo.path.substringAfter("/FotoArchivio/").trimEnd('/'), photo.name)
             }
             FaZipExporter.write(contentResolver, zipUri, entries)
             val share = Intent(Intent.ACTION_SEND).apply {
