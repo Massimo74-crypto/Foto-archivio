@@ -11,7 +11,7 @@ Il progetto si trova in `FA-Android/`.
 1. All'avvio si sceglie PERSONALE oppure LAVORO.
 2. FA apre la fotocamera di sistema tramite l'azione standard Android `TakePicture`. Sul Motorola verrà usata l'app fotocamera predefinita del dispositivo, se impostata come gestore predefinito.
 3. Dopo lo scatto compare il modulo di archiviazione con tastiera, nome file, scelta PERSONALE/LAVORO e sottocartella.
-4. SALVA rinomina e sposta la foto in `Pictures/FA/PERSONALE/<sottocartella>/` oppure `Pictures/FA/LAVORO/<sottocartella>/`.
+4. SALVA rinomina e sposta la foto in `Pictures/FotoArchivio/PERSONALE/<sottocartella>/` oppure `Pictures/FotoArchivio/LAVORO/<sottocartella>/`.
 5. ELIMINA cancella lo scatto e riapre la fotocamera.
 6. Gestione archivio permette di elencare, rinominare, spostare ed eliminare le foto. È disponibile anche la rinomina e la rimozione delle sottocartelle vuote.
 
