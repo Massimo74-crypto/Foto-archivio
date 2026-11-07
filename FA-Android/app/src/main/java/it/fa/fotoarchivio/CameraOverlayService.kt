@@ -422,7 +422,7 @@ class CameraOverlayService : Service() {
         val labels = choices.map { (cat, path) ->
             (if (cat == category) "✓ " else "") + "$cat  /  $path"
         }.toTypedArray()
-        android.app.AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+        val dialog = android.app.AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Scegli la cartella di destinazione")
             .setItems(labels) { _, which ->
                 category = choices[which].first
@@ -435,7 +435,9 @@ class CameraOverlayService : Service() {
                 Toast.makeText(this, "Destinazione: $category / $folder", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Annulla", null)
-            .show()
+            .create()
+        dialog.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        dialog.show()
     }
 
     private fun safeName(value: String): String =
