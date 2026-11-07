@@ -358,14 +358,18 @@ class MainActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
             else startService(serviceIntent)
 
+            // Non usare resolveActivity(): su Android recenti la visibilità dei pacchetti
+            // può far risultare assente la fotocamera anche quando è installata.
+            // Prova direttamente ad aprire l'interfaccia completa della fotocamera.
             val cameraIntent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
-            if (cameraIntent.resolveActivity(packageManager) == null) {
-                stopService(Intent(this, CameraOverlayService::class.java))
-                toast("Non trovo la fotocamera di sistema")
-                return
-            }
             cameraSessionLaunched = true
-            startActivity(cameraIntent)
+            try {
+                startActivity(cameraIntent)
+            } catch (e: android.content.ActivityNotFoundException) {
+                cameraSessionLaunched = false
+                stopService(Intent(this, CameraOverlayService::class.java))
+                toast("Android non ha trovato un'app fotocamera compatibile")
+            }
         } catch (e: Exception) {
             cameraSessionLaunched = false
             stopService(Intent(this, CameraOverlayService::class.java))
