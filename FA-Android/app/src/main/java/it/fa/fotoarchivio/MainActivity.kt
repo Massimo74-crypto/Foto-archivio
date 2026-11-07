@@ -1405,3 +1405,5 @@ private class SimpleItemSelectedListener(
         id: Long
     ) = action()
 }
+
+// Build trigger: include the immediate camera launch and asynchronous GPS startup changes.
