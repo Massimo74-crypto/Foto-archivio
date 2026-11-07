@@ -1,5 +1,6 @@
 package it.fa.fotoarchivio
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +9,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -29,6 +34,11 @@ import android.content.pm.ServiceInfo
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.TimeZone
+import java.util.Calendar
+import androidx.exifinterface.media.ExifInterface
 
 class CameraOverlayService : Service() {
     companion object {
@@ -52,6 +62,11 @@ class CameraOverlayService : Service() {
     private var stableChecks = 0
     private var displayedId = -1L
     private var lastSavedId = -1L
+    private var candidateLocation: Location? = null
+    private var locationManager: LocationManager? = null
+    private var locationListener: LocationListener? = null
+    private var photoDateTakenMillis: Long? = null
+    private val locationTimeout = Runnable { stopLocationUpdates() }
 
     private val observer = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
@@ -64,8 +79,11 @@ class CameraOverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
         val notification = buildNotification()
+        val hasLocationPermission = hasAnyLocationPermission()
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            val foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                (if (hasLocationPermission) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
+            startForeground(NOTIFICATION_ID, notification, foregroundTypes)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -119,6 +137,8 @@ class CameraOverlayService : Service() {
                 candidateUri = uri
                 candidateSize = size
                 stableChecks = 0
+                photoDateTakenMillis = getPhotoDateTaken(uri)
+                startLocationCapture()
                 handler.postDelayed(this, 900L)
                 return
             }
@@ -166,6 +186,98 @@ class CameraOverlayService : Service() {
         }
     }
 
+    private fun hasAnyLocationPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    private fun getPhotoDateTaken(uri: Uri): Long? {
+        return try {
+            contentResolver.query(uri, arrayOf(MediaStore.Images.Media.DATE_TAKEN), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getLong(0).takeIf { it > 0L } else null
+            }
+        } catch (_: Exception) { null }
+    }
+
+    private fun startLocationCapture() {
+        stopLocationUpdates()
+        candidateLocation = null
+        if (!hasAnyLocationPermission()) return
+        try {
+            val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+            locationManager = manager
+            val now = System.currentTimeMillis()
+            manager.getProviders(true).forEach { provider ->
+                try {
+                    val last = manager.getLastKnownLocation(provider)
+                    if (last != null && now - last.time in 0..120_000L) {
+                        val current = candidateLocation
+                        if (current == null || last.accuracy < current.accuracy) candidateLocation = last
+                    }
+                } catch (_: SecurityException) { }
+            }
+            val listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    val current = candidateLocation
+                    if (current == null || location.accuracy < current.accuracy ||
+                        (location.time > current.time && location.accuracy <= current.accuracy + 15f)) {
+                        candidateLocation = location
+                    }
+                    if (location.accuracy <= 20f) stopLocationUpdates()
+                }
+            }
+            locationListener = listener
+            manager.getProviders(true)
+                .filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
+                .forEach { provider ->
+                    try { manager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper()) }
+                    catch (_: SecurityException) { }
+                }
+            handler.postDelayed(locationTimeout, 10_000L)
+        } catch (_: Exception) {
+            stopLocationUpdates()
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        handler.removeCallbacks(locationTimeout)
+        val manager = locationManager
+        val listener = locationListener
+        if (manager != null && listener != null) {
+            try { manager.removeUpdates(listener) } catch (_: Exception) { }
+        }
+        locationListener = null
+        locationManager = null
+    }
+
+    private fun writePhotoMetadata(file: File): Boolean {
+        return try {
+            val exif = ExifInterface(file)
+            val takenAt = photoDateTakenMillis
+            if (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL).isNullOrBlank() && takenAt != null) {
+                val formatter = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
+                exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, formatter.format(Date(takenAt)))
+                exif.setAttribute(ExifInterface.TAG_DATETIME, formatter.format(Date(takenAt)))
+            }
+            val location = candidateLocation?.takeIf { System.currentTimeMillis() - it.time <= 120_000L }
+            if (location != null) {
+                exif.setLatLong(location.latitude, location.longitude)
+                if (location.hasAltitude()) {
+                    val altitudeHundredths = kotlin.math.round(kotlin.math.abs(location.altitude) * 100.0).toLong()
+                    exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE, "$altitudeHundredths/100")
+                    exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF, if (location.altitude < 0) "1" else "0")
+                }
+                val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = location.time }
+                exif.setAttribute(ExifInterface.TAG_GPS_DATESTAMP, String.format(Locale.US, "%04d:%02d:%02d",
+                    utc.get(Calendar.YEAR), utc.get(Calendar.MONTH) + 1, utc.get(Calendar.DAY_OF_MONTH)))
+                exif.setAttribute(ExifInterface.TAG_GPS_TIMESTAMP, String.format(Locale.US, "%d/1,%d/1,%d/1",
+                    utc.get(Calendar.HOUR_OF_DAY), utc.get(Calendar.MINUTE), utc.get(Calendar.SECOND)))
+            }
+            exif.saveAttributes()
+            location != null
+        } catch (_: Exception) {
+            false
+        }
+    }
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
@@ -291,7 +403,9 @@ class CameraOverlayService : Service() {
                 destination.delete()
                 throw IllegalStateException("Copia non riuscita")
             }
-            Toast.makeText(this, "Copia salvata in FA/$category/$folder", Toast.LENGTH_SHORT).show()
+            val gpsSaved = writePhotoMetadata(destination)
+            val message = if (gpsSaved) "Copia salvata in FA/$category/$folder • GPS registrato" else "Copia salvata in FA/$category/$folder • posizione non disponibile"
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             dismissOverlay(markAsHandled = true)
         } catch (e: Exception) {
             Toast.makeText(this, "Errore: ${e.localizedMessage ?: "salvataggio non riuscito"}", Toast.LENGTH_LONG).show()
@@ -314,6 +428,9 @@ class CameraOverlayService : Service() {
         photoUri = null
         if (markAsHandled) lastSavedId = displayedId
         displayedId = -1L
+        stopLocationUpdates()
+        candidateLocation = null
+        photoDateTakenMillis = null
         candidateUri = null
         candidateSize = -1L
         stableChecks = 0
@@ -321,6 +438,7 @@ class CameraOverlayService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        stopLocationUpdates()
         try { contentResolver.unregisterContentObserver(observer) } catch (_: Exception) { }
         dismissOverlay(markAsHandled = false)
         super.onDestroy()
