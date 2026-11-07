@@ -58,6 +58,8 @@ class CameraOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var overlay: LinearLayout? = null
     private var nameInput: EditText? = null
+    private var saveButton: Button? = null
+    private var saveInProgress = false
     private var photoUri: Uri? = null
     private var category = "PERSONALE"
     private var folder = "Generale"
@@ -199,7 +201,9 @@ class CameraOverlayService : Service() {
                     val path = if (pathColumn >= 0) cursor.getString(pathColumn).orEmpty() else ""
                     if (!path.startsWith("DCIM/Camera", ignoreCase = true)) continue
                     val id = cursor.getLong(idColumn)
-                    if (id == lastSavedId || id == displayedId) continue
+                    // Considera solo lo scatto più recente: dopo SALVA non riaprire
+                    // finestre per fotografie precedenti della stessa sessione.
+                    if (id == lastSavedId || id == displayedId) return@use null
                     val size = cursor.getLong(sizeColumn)
                     return@use if (size > 0L) Uri.withAppendedPath(collection, id.toString()) to size else null
                 }
@@ -319,6 +323,7 @@ class CameraOverlayService : Service() {
 
     private fun showNameOverlay(uri: Uri, id: Long) {
         if (overlay != null || !android.provider.Settings.canDrawOverlays(this)) return
+        saveInProgress = false
         photoUri = uri
         displayedId = id
 
@@ -394,8 +399,15 @@ class CameraOverlayService : Service() {
         val save = Button(this).apply {
             text = "SALVA IN FA"
             isAllCaps = false
-            setOnClickListener { savePhotoToArchive() }
+            setOnClickListener {
+                if (!saveInProgress) {
+                    saveInProgress = true
+                    isEnabled = false
+                    savePhotoToArchive()
+                }
+            }
         }
+        saveButton = save
         actions.addView(changeFolder, LinearLayout.LayoutParams(0, dp(48), 1.15f))
         actions.addView(skip, LinearLayout.LayoutParams(0, dp(48), 0.75f))
         actions.addView(save, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -496,6 +508,8 @@ class CameraOverlayService : Service() {
         val baseName = safeName(rawName)
         if (baseName.isBlank()) {
             nameInput?.error = "Inserisci un nome"
+            saveInProgress = false
+            saveButton?.isEnabled = true
             return
         }
         val sourceName = try {
@@ -514,6 +528,8 @@ class CameraOverlayService : Service() {
             destinationDir.mkdirs()
             if (destination.exists()) {
                 nameInput?.error = "Nome già presente in questa cartella"
+                saveInProgress = false
+                saveButton?.isEnabled = true
                 return
             }
             val input = contentResolver.openInputStream(uri)
@@ -530,11 +546,26 @@ class CameraOverlayService : Service() {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             dismissOverlay(markAsHandled = true)
         } catch (e: Exception) {
+            saveInProgress = false
+            saveButton?.isEnabled = true
             Toast.makeText(this, "Errore: ${e.localizedMessage ?: "salvataggio non riuscito"}", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun dismissOverlay(markAsHandled: Boolean) {
+        val handledId = displayedId
+        val panel = overlay
+        // Azzera prima lo stato: nessun controllo successivo deve considerare
+        // ancora aperta la finestra appena salvata.
+        overlay = null
+        panel?.let {
+            it.visibility = android.view.View.GONE
+            try {
+                windowManager.removeView(it)
+            } catch (_: Exception) {
+                try { windowManager.removeViewImmediate(it) } catch (_: Exception) { }
+            }
+        }
         val input = nameInput
         if (input != null) {
             try {
@@ -542,14 +573,12 @@ class CameraOverlayService : Service() {
                     .hideSoftInputFromWindow(input.windowToken, 0)
             } catch (_: Exception) { }
         }
-        overlay?.let {
-            try { windowManager.removeView(it) } catch (_: Exception) { }
-        }
-        overlay = null
         nameInput = null
+        saveButton = null
+        saveInProgress = false
         folderLabel = null
         photoUri = null
-        if (markAsHandled) lastSavedId = displayedId
+        if (markAsHandled && handledId >= 0L) lastSavedId = handledId
         displayedId = -1L
         // Conserva il fix acquisito prima di aprire la fotocamera per gli scatti
         // successivi della stessa sessione; writePhotoMetadata lo usa solo se recente.
