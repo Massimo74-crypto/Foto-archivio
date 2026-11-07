@@ -171,10 +171,7 @@ class MainActivity : ComponentActivity() {
         val storage = Environment.getExternalStorageDirectory()
         val legacyNames = mutableListOf("FA archivio principale")
         val shortLegacy = File(storage, "$top/FA")
-        if (shortLegacy.isDirectory &&
-            (File(shortLegacy, "PERSONALE").isDirectory || File(shortLegacy, "LAVORO").isDirectory)) {
-            legacyNames.add("FA")
-        }
+        if (shortLegacy.isDirectory) legacyNames.add("FA")
         legacyNames.forEach { legacyName ->
             val legacy = File(storage, "$top/$legacyName")
             if (!legacy.isDirectory || legacy.canonicalFile == archiveRoot(isVideo).canonicalFile) return@forEach
