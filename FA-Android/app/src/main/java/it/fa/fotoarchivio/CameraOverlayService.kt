@@ -63,7 +63,7 @@ class CameraOverlayService : Service() {
     private var saveInProgress = false
     private var photoUri: Uri? = null
     private var displayedFile: File? = null
-    private var lastHandledFilePath: String? = null
+    private val handledFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
     private var category = "PERSONALE"
     private var folder = "Generale"
@@ -163,7 +163,7 @@ class CameraOverlayService : Service() {
         val displayedPath = displayedFile?.let {
             try { it.canonicalPath } catch (_: Exception) { it.absolutePath }
         }
-        if (path == lastHandledFilePath || path == displayedPath) return
+        if (handledFilePaths.contains(path) || path == displayedPath) return
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
         showNameOverlay(null, -1L, file)
     }
@@ -259,7 +259,7 @@ class CameraOverlayService : Service() {
                             "Camera/$name"
                         )
                         val directPath = try { directFile.canonicalPath } catch (_: Exception) { directFile.absolutePath }
-                        if (directPath == lastHandledFilePath) continue
+                        if (handledFilePaths.contains(directPath)) continue
                     }
                     val size = cursor.getLong(sizeColumn)
                     return@use if (size > 0L) Uri.withAppendedPath(collection, id.toString()) to size else null
@@ -515,6 +515,7 @@ class CameraOverlayService : Service() {
         } catch (_: Exception) {
             overlay = null
             photoUri = null
+            displayedFile = null
             displayedId = -1L
         }
     }
@@ -663,7 +664,7 @@ class CameraOverlayService : Service() {
         photoUri = null
         if (markAsHandled && handledId >= 0L) lastSavedId = handledId
         if (markAsHandled) displayedFile?.let { file ->
-            lastHandledFilePath = try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
+            handledFilePaths.add(try { file.canonicalPath } catch (_: Exception) { file.absolutePath })
         }
         displayedFile = null
         displayedId = -1L
