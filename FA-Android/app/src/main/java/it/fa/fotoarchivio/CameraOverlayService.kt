@@ -346,9 +346,22 @@ class CameraOverlayService : Service() {
             setTextColor(0xFFD8D5D0.toInt())
             setPadding(0, 0, 0, dp(6))
         })
-        val input = EditText(this).apply {
+        val input = object : EditText(this) {
+            override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                super.onWindowFocusChanged(hasWindowFocus)
+                if (hasWindowFocus) {
+                    requestFocus()
+                    post {
+                        (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                            .showSoftInput(this, 0)
+                    }
+                }
+            }
+        }.apply {
             hint = "Nome della foto"
             isSingleLine = true
+            isFocusable = true
+            isFocusableInTouchMode = true
             textSize = 18f
             setTextColor(0xFFFFFFFF.toInt())
             setHintTextColor(0xFFB8C7D2.toInt())
@@ -397,16 +410,27 @@ class CameraOverlayService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             y = dp(74)
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
         try {
             windowManager.addView(panel, params)
             overlay = panel
+            panel.isFocusableInTouchMode = true
             input.requestFocus()
+            input.post {
+                input.requestFocus()
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(input, 0)
+            }
+            // Secondo tentativo dopo il completamento del focus della finestra overlay.
             input.postDelayed({
-                (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
-            }, 250L)
+                if (overlay === panel && input.hasWindowFocus()) {
+                    input.requestFocus()
+                    (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                        .showSoftInput(input, 0)
+                }
+            }, 500L)
         } catch (_: Exception) {
             overlay = null
             photoUri = null
