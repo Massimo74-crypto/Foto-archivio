@@ -527,8 +527,8 @@ class CameraOverlayService : Service() {
         photoUri = null
         if (markAsHandled) lastSavedId = displayedId
         displayedId = -1L
-        stopLocationUpdates()
-        candidateLocation = null
+        // Conserva il fix acquisito prima di aprire la fotocamera per gli scatti
+        // successivi della stessa sessione; writePhotoMetadata lo usa solo se recente.
         photoDateTakenMillis = null
         candidateUri = null
         candidateSize = -1L
