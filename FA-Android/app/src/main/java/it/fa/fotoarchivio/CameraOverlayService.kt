@@ -66,7 +66,6 @@ class CameraOverlayService : Service() {
     private var locationManager: LocationManager? = null
     private var locationListener: LocationListener? = null
     private var photoDateTakenMillis: Long? = null
-    private val locationTimeout = Runnable { stopLocationUpdates() }
 
     private val observer = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
@@ -79,11 +78,10 @@ class CameraOverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
         val notification = buildNotification()
-        val hasLocationPermission = hasAnyLocationPermission()
+        // Mantiene invariato il tipo di servizio già collaudato nella 0.4.1.
+        // La raccolta GPS è facoltativa e non deve impedire l'avvio della sovrapposizione.
         if (Build.VERSION.SDK_INT >= 34) {
-            val foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
-                (if (hasLocationPermission) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
-            startForeground(NOTIFICATION_ID, notification, foregroundTypes)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -227,19 +225,16 @@ class CameraOverlayService : Service() {
                 }
             }
             locationListener = listener
-            manager.getProviders(true)
-                .filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
-                .forEach { provider ->
-                    try { manager.requestLocationUpdates(provider, 1000L, 0f, listener, Looper.getMainLooper()) }
-                    catch (_: SecurityException) { }
-                }
+            // Non avvia aggiornamenti continui in background: il fix recente già
+            // disponibile viene acquisito mentre FA è ancora in primo piano.
+            // Così il GPS non può interferire con il servizio overlay della fotocamera.
+
         } catch (_: Exception) {
             stopLocationUpdates()
         }
     }
 
     private fun stopLocationUpdates() {
-        handler.removeCallbacks(locationTimeout)
         val manager = locationManager
         val listener = locationListener
         if (manager != null && listener != null) {
