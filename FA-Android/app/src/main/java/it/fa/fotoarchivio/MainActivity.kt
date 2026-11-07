@@ -91,7 +91,8 @@ class MainActivity : ComponentActivity() {
         val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (!granted) toast("Posizione non autorizzata: FA salverà comunque la foto, ma senza nuove coordinate GPS")
-        acquireLocationThenStartCamera()
+        // Non attendere il fix GPS: avvia subito la fotocamera.
+        startNativeCameraSession()
     }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -437,7 +438,8 @@ class MainActivity : ComponentActivity() {
         val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (fine || coarse) {
-            acquireLocationThenStartCamera()
+            // La fotocamera parte subito: il servizio aggiorna il GPS in parallelo.
+            startNativeCameraSession()
         } else {
             locationPermissionLauncher.launch(arrayOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
