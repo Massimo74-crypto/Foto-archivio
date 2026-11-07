@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Golden wooden cabinet backdrop -->
+    <path android:fillColor="#4A2418" android:pathData="M0,0h108v108h-108z"/>
+    <path android:fillColor="#75401F" android:pathData="M0,0h108v14h-108z"/>
+    <path android:fillColor="#A96B35" android:pathData="M0,13h108v3h-108z"/>
+    <path android:fillColor="#3B2118" android:pathData="M0,16h108v3h-108z"/>
+
+    <!-- Albums on the shelf -->
+    <path android:fillColor="#63251F" android:pathData="M7,17h19q3,0 3,4v45h-22z"/>
+    <path android:fillColor="#9B5730" android:pathData="M8,20h17v2h-17zM8,58h17v2h-17z"/>
+    <path android:fillColor="#D9A85E" android:pathData="M10,24h2v34h-2zM23,24h1v34h-1z"/>
+    <path android:fillColor="#1F4B3D" android:pathData="M31,13h18q3,0 3,4v49h-21z"/>
+    <path android:fillColor="#D4A65E" android:pathData="M34,18h2v42h-2zM46,18h1v42h-1zM32,23h18v2h-18zM32,57h18v2h-18z"/>
+    <path android:fillColor="#A96B2E" android:pathData="M56,19h17q3,0 3,4v43h-20z"/>
+    <path android:fillColor="#F0CB82" android:pathData="M59,24h2v34h-2zM70,24h1v34h-1zM57,28h18v2h-18zM57,56h18v2h-18z"/>
+    <path android:fillColor="#D9A85E" android:pathData="M12,38h13v2h-13zM34,39h16v2h-16zM59,40h15v2h-15z"/>
+
+    <!-- Vintage movie camera at upper right -->
+    <path android:fillColor="#252321" android:pathData="M76,26h23q3,0 3,3v19q0,3 -3,3h-23z"/>
+    <path android:fillColor="#B9A58A" android:pathData="M78,29h19v17h-19z"/>
+    <path android:fillColor="#332B25" android:pathData="M80,31h15v13h-15z"/>
+    <path android:fillColor="#D6B16F" android:pathData="M83,33a5,5 0,1 0,10 0a5,5 0,1 0,-10 0z"/>
+    <path android:fillColor="#211D1A" android:pathData="M85,33a3,3 0,1 0,6 0a3,3 0,1 0,-6 0z"/>
+    <path android:fillColor="#B9A58A" android:pathData="M97,33h7v9h-7z"/>
+    <path android:fillColor="#D7B66F" android:pathData="M80,25h7v3h-7zM91,25h6v3h-6z"/>
+    <path android:fillColor="#5B3925" android:pathData="M85,51h5v8h-5zM79,58h17v3h-17z"/>
+
+    <!-- Main vintage still camera -->
+    <path android:fillColor="#211F1D" android:pathData="M13,49q0,-4 5,-4h8l5,-7h28l6,7h8q5,0 5,5v27q0,5 -5,5h-55q-5,0 -5,-5z"/>
+    <path android:fillColor="#D6C7AC" android:pathData="M17,49h12l5,-7h23l6,7h10v27h-56z"/>
+    <path android:fillColor="#292724" android:pathData="M17,55h56v21h-56z"/>
+    <path android:fillColor="#A16A39" android:pathData="M32,44h27l4,5h-35z"/>
+    <path android:fillColor="#E0B66D" android:pathData="M40,47h12v3h-12z"/>
+    <path android:fillColor="#B58A52" android:pathData="M22,48h7v4h-7zM62,48h7v4h-7z"/>
+
+    <!-- Large glass lens -->
+    <path android:fillColor="#D6A65C" android:pathData="M45,51a18,18 0,1 0,0 36a18,18 0,1 0,0 -36z"/>
+    <path android:fillColor="#171716" android:pathData="M45,54a15,15 0,1 0,0 30a15,15 0,1 0,0 -30z"/>
+    <path android:fillColor="#59432F" android:pathData="M45,57a12,12 0,1 0,0 24a12,12 0,1 0,0 -24z"/>
+    <path android:fillColor="#243F46" android:pathData="M45,60a9,9 0,1 0,0 18a9,9 0,1 0,0 -18z"/>
+    <path android:fillColor="#A9B5A4" android:pathData="M39,64q5,-6 12,-1q-7,-2 -10,6z"/>
+    <path android:fillColor="#E9D2A3" android:pathData="M19,52h5v2h-5zM65,52h5v2h-5z"/>
+
+    <!-- Shelf and film strip -->
+    <path android:fillColor="#4B2819" android:pathData="M0,85h108v7h-108z"/>
+    <path android:fillColor="#B7793C" android:pathData="M0,85h108v2h-108z"/>
+    <path android:fillColor="#D39B55" android:pathData="M0,92h108v3h-108z"/>
+    <path android:fillColor="#34221A" android:pathData="M0,95h108v13h-108z"/>
+    <path android:fillColor="#D9A85E" android:pathData="M76,76h5v10h-5z"/>
+    <path android:fillColor="#30231C" android:pathData="M78,77h2v8h-2z"/>
+    <path android:fillColor="#D5A45B" android:pathData="M82,78h19v7h-19z"/>
+    <path android:fillColor="#2C211B" android:pathData="M84,80h15v3h-15z"/>
+    <path android:fillColor="#E7C27A" android:pathData="M85,78h2v2h-2zM90,78h2v2h-2zM95,78h2v2h-2z"/>
+    <path android:fillColor="#E7C27A" android:pathData="M85,83h2v2h-2zM90,83h2v2h-2zM95,83h2v2h-2z"/>
+
+    <!-- Subtle gold frame -->
+    <path android:fillColor="#E8C27B" android:pathData="M3,3h102v2h-102zM3,103h102v2h-102zM3,3h2v102h-2zM103,3h2v102h-2z"/>
+</vector>
