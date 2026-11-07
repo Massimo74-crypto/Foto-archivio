@@ -17,6 +17,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.FileObserver
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -61,6 +62,9 @@ class CameraOverlayService : Service() {
     private var saveButton: Button? = null
     private var saveInProgress = false
     private var photoUri: Uri? = null
+    private var displayedFile: File? = null
+    private var lastHandledFilePath: String? = null
+    private var cameraDirectoryObserver: FileObserver? = null
     private var category = "PERSONALE"
     private var folder = "Generale"
     private var sessionStartSeconds = 0L
@@ -119,10 +123,49 @@ class CameraOverlayService : Service() {
         contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
         )
+        startCameraDirectoryObserver()
         // Avvia anche un controllo periodico: non dipendiamo esclusivamente
         // dalla notifica MediaStore, che su alcuni telefoni può arrivare in ritardo.
         schedulePhotoCheck(50L)
         return START_NOT_STICKY
+    }
+
+    // Intercetta la chiusura del file scritto dalla fotocamera nativa:
+    // il popup non deve attendere l'indicizzazione di MediaStore.
+    // Il controllo MediaStore resta attivo come fallback.
+    private fun startCameraDirectoryObserver() {
+        val cameraDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera")
+        if (!cameraDir.exists() || !cameraDir.isDirectory) return
+        try {
+            cameraDirectoryObserver?.stopWatching()
+            cameraDirectoryObserver = object : FileObserver(
+                cameraDir.absolutePath,
+                FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+            ) {
+                override fun onEvent(event: Int, path: String?) {
+                    if (path.isNullOrBlank()) return
+                    val file = File(cameraDir, path)
+                    if (!isCameraImage(file)) return
+                    handler.post { handleCompletedCameraFile(file) }
+                }
+            }.also { it.startWatching() }
+        } catch (_: Exception) {
+            cameraDirectoryObserver = null
+        }
+    }
+
+    private fun isCameraImage(file: File): Boolean =
+        file.extension.lowercase(Locale.ROOT) in setOf("jpg", "jpeg", "png", "webp", "heic", "heif", "dng")
+
+    private fun handleCompletedCameraFile(file: File) {
+        if (overlay != null || !file.isFile || file.length() <= 0L) return
+        val path = try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
+        val displayedPath = displayedFile?.let {
+            try { it.canonicalPath } catch (_: Exception) { it.absolutePath }
+        }
+        if (path == lastHandledFilePath || path == displayedPath) return
+        photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
+        showNameOverlay(null, -1L, file)
     }
 
     private fun createNotificationChannel() {
@@ -166,7 +209,8 @@ class CameraOverlayService : Service() {
                 candidateUri = uri
                 candidateSize = size
                 stableChecks = 0
-                photoDateTakenMillis = getPhotoDateTaken(uri)
+                photoDateTakenMillis = if (sourceFile != null) sourceFile.lastModified().takeIf { it > 0L }
+            else uri?.let { getPhotoDateTaken(it) }
                 handler.postDelayed(this, 60L)
                 return
             }
@@ -187,7 +231,8 @@ class CameraOverlayService : Service() {
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DATE_ADDED,
             MediaStore.Images.Media.RELATIVE_PATH,
-            MediaStore.Images.Media.SIZE
+            MediaStore.Images.Media.SIZE,
+            MediaStore.Images.Media.DISPLAY_NAME
         )
         return try {
             contentResolver.query(
@@ -205,7 +250,17 @@ class CameraOverlayService : Service() {
                     val id = cursor.getLong(idColumn)
                     // Considera solo lo scatto più recente: dopo SALVA non riaprire
                     // finestre per fotografie precedenti della stessa sessione.
-                    if (id == lastSavedId || id == displayedId) return@use null
+                    if (id == lastSavedId || id == displayedId) continue
+                    val nameColumn = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
+                    if (nameColumn >= 0) {
+                        val name = cursor.getString(nameColumn).orEmpty()
+                        val directFile = File(
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                            "Camera/$name"
+                        )
+                        val directPath = try { directFile.canonicalPath } catch (_: Exception) { directFile.absolutePath }
+                        if (directPath == lastHandledFilePath) continue
+                    }
                     val size = cursor.getLong(sizeColumn)
                     return@use if (size > 0L) Uri.withAppendedPath(collection, id.toString()) to size else null
                 }
@@ -327,10 +382,11 @@ class CameraOverlayService : Service() {
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
-    private fun showNameOverlay(uri: Uri, id: Long) {
+    private fun showNameOverlay(uri: Uri?, id: Long, sourceFile: File? = null) {
         if (overlay != null || !android.provider.Settings.canDrawOverlays(this)) return
         saveInProgress = false
         photoUri = uri
+        displayedFile = sourceFile
         displayedId = id
 
         val panel = LinearLayout(this).apply {
@@ -522,11 +578,15 @@ class CameraOverlayService : Service() {
     }
 
     private fun savePhotoToArchive() {
-        val uri = photoUri ?: return
+        val sourceFile = displayedFile
+        val uri = photoUri
+        if (sourceFile == null && uri == null) return
         val requestedName = safeName(nameInput?.text?.toString().orEmpty())
-        val sourceName = try {
-            contentResolver.query(uri, arrayOf(MediaStore.Images.Media.DISPLAY_NAME), null, null, null)
-                ?.use { if (it.moveToFirst()) it.getString(0) else null }
+        val sourceName = sourceFile?.name ?: try {
+            uri?.let {
+                contentResolver.query(it, arrayOf(MediaStore.Images.Media.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }
         } catch (_: Exception) { null } ?: "foto.jpg"
         val extension = sourceName.substringAfterLast('.', "jpg")
             .lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "").ifBlank { "jpg" }
@@ -547,10 +607,18 @@ class CameraOverlayService : Service() {
                 saveButton?.isEnabled = true
                 return
             }
-            val input = contentResolver.openInputStream(uri)
-                ?: throw IllegalStateException("Foto originale non leggibile")
-            input.use { source ->
-                FileOutputStream(destination).use { target -> source.copyTo(target) }
+            if (sourceFile != null) {
+                if (!sourceFile.isFile || sourceFile.length() <= 0L)
+                    throw IllegalStateException("Foto originale non ancora disponibile")
+                sourceFile.inputStream().use { source ->
+                    FileOutputStream(destination).use { target -> source.copyTo(target) }
+                }
+            } else {
+                val input = contentResolver.openInputStream(uri!!)
+                    ?: throw IllegalStateException("Foto originale non leggibile")
+                input.use { source ->
+                    FileOutputStream(destination).use { target -> source.copyTo(target) }
+                }
             }
             if (!destination.exists() || destination.length() == 0L) {
                 destination.delete()
@@ -594,6 +662,10 @@ class CameraOverlayService : Service() {
         folderLabel = null
         photoUri = null
         if (markAsHandled && handledId >= 0L) lastSavedId = handledId
+        if (markAsHandled) displayedFile?.let { file ->
+            lastHandledFilePath = try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
+        }
+        displayedFile = null
         displayedId = -1L
         // Conserva il fix acquisito prima di aprire la fotocamera per gli scatti
         // successivi della stessa sessione; writePhotoMetadata lo usa solo se recente.
@@ -606,6 +678,8 @@ class CameraOverlayService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        cameraDirectoryObserver?.stopWatching()
+        cameraDirectoryObserver = null
         stopLocationUpdates()
         try { contentResolver.unregisterContentObserver(observer) } catch (_: Exception) { }
         dismissOverlay(markAsHandled = false)
