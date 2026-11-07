@@ -794,7 +794,8 @@ class MainActivity : ComponentActivity() {
         val exactRelative = current.trim('/')
         val photos = allItems.filter {
             val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
-            relative == exactRelative
+            val parentFolder = relative.substringBeforeLast('/', "")
+            parentFolder == exactRelative
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
         val descendantCount = allItems.count {
             val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
