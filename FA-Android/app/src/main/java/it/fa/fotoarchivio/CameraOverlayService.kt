@@ -219,7 +219,7 @@ class CameraOverlayService : Service() {
                 val id = uri.lastPathSegment?.toLongOrNull() ?: -1L
                 if (id != lastSavedId && id != displayedId) showNameOverlay(uri, id)
             } else {
-                handler.postDelayed(this, 250L)
+                handler.postDelayed(this, 50L)
             }
         }
     }
@@ -677,7 +677,7 @@ class CameraOverlayService : Service() {
         candidateUri = null
         candidateSize = -1L
         stableChecks = 0
-        if (markAsHandled) schedulePhotoCheck(250L)
+        if (markAsHandled) schedulePhotoCheck(50L)
     }
 
     override fun onDestroy() {
