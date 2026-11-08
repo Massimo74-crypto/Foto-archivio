@@ -29,3 +29,13 @@ Al termine, scaricare l'artifact **FA-Foto-Archivio-debug** e installare `app-de
 - La disponibilità di modalità come Notte, Panorama e controlli manuali dipende dalla fotocamera predefinita Motorola e dal comportamento dell'app fotocamera con l'azione di acquisizione.
 - L'app richiede Android 10 o successivo.
 - Questa è una prima base funzionale da provare sul Motorola. Prima di considerarla definitiva occorre verificare il comportamento reale del passaggio alla fotocamera, il salvataggio e la gestione cartelle sul dispositivo.
+
+## Candidato 0.5.2
+
+Questa build di prova include:
+- selezione di cartelle e foto senza ricostruire l'intera schermata a ogni tocco;
+- gestione del salvataggio collegata alla sessione del popup, anche se Motorola rinomina il file durante la copia;
+- verifica della copia prima della conferma e gestione del nome automatico `fotoN`;
+- reset una tantum dell'archivio FA alla prima apertura della 0.5.2: PERSONALE e LAVORO vengono ricreate vuote e le preferenze delle sottocartelle vengono azzerate;
+- nessuna cancellazione o modifica di `DCIM/Camera`;
+- PNG fotografico di sfondo originale mantenuto separato da una piccola cinepresa vintage WebP trasparente; il PNG non viene ricostruito né modificato.
