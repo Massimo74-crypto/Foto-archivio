@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.ContentValues
 import android.content.Context
+import android.database.ContentObserver
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.content.pm.PackageManager
@@ -68,6 +69,7 @@ class CameraOverlayService : Service() {
     private val handledPathsAwaitingRename = mutableSetOf<String>()
     private val completedFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
+    private var mediaStoreObserver: ContentObserver? = null
     private var pendingPopupFile: File? = null
     private var pendingPopupWasMoved = false
     private var pendingPopupRunnable: Runnable? = null
@@ -137,6 +139,28 @@ class CameraOverlayService : Service() {
     // il popup non deve attendere l'indicizzazione di MediaStore.
     // Il controllo MediaStore resta attivo come fallback.
     private fun startCameraDirectoryObserver() {
+        // Il FileObserver intercetta subito i file nel percorso standard Motorola.
+        // MediaStore è il secondo canale: alcune versioni della fotocamera pubblicano
+        // le foto senza generare tutti gli eventi filesystem attesi.
+        try {
+            mediaStoreObserver?.let { contentResolver.unregisterContentObserver(it) }
+            mediaStoreObserver = object : ContentObserver(handler) {
+                override fun onChange(selfChange: Boolean, uri: Uri?) {
+                    super.onChange(selfChange, uri)
+                    scanRecentCameraMedia()
+                }
+            }.also { observer ->
+                contentResolver.registerContentObserver(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
+                )
+                contentResolver.registerContentObserver(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
+                )
+            }
+        } catch (_: Exception) {
+            mediaStoreObserver = null
+        }
+
         val cameraDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera")
         if (!cameraDir.exists() || !cameraDir.isDirectory) return
         try {
@@ -154,6 +178,41 @@ class CameraOverlayService : Service() {
             }.also { it.startWatching() }
         } catch (_: Exception) {
             cameraDirectoryObserver = null
+        }
+    }
+
+    private fun scanRecentCameraMedia() {
+        if (overlay != null || pendingPopupFile != null) return
+        val since = (sessionStartSeconds - 5L).coerceAtLeast(0L).toString()
+        val collections = listOf(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        )
+        collections.forEach { collection ->
+            try {
+                contentResolver.query(
+                    collection,
+                    arrayOf(MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED),
+                    "${MediaStore.MediaColumns.DATE_ADDED} >= ?",
+                    arrayOf(since),
+                    "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+                )?.use { cursor ->
+                    val pathColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                    if (pathColumn < 0) return@use
+                    var checked = 0
+                    while (cursor.moveToNext() && checked++ < 25) {
+                        val path = cursor.getString(pathColumn) ?: continue
+                        val normalized = path.replace('\\\\', '/')
+                        if (!normalized.contains("/DCIM/", ignoreCase = true)) continue
+                        val file = File(path)
+                        if (!file.isFile || file.length() <= 0L || !isCameraMedia(file)) continue
+                        val key = filePath(file)
+                        if (handledFilePaths.contains(key) || popupQueuedOrShownPaths.contains(key)) continue
+                        handleCameraFileEvent(file, FileObserver.CREATE)
+                        if (pendingPopupFile != null || overlay != null) return
+                    }
+                }
+            } catch (_: Exception) { }
         }
     }
 
@@ -953,6 +1012,10 @@ class CameraOverlayService : Service() {
         cancelReadinessCheck()
         cameraDirectoryObserver?.stopWatching()
         cameraDirectoryObserver = null
+        mediaStoreObserver?.let {
+            try { contentResolver.unregisterContentObserver(it) } catch (_: Exception) { }
+        }
+        mediaStoreObserver = null
         stopLocationUpdates()
         dismissOverlay(markAsHandled = false)
         super.onDestroy()
