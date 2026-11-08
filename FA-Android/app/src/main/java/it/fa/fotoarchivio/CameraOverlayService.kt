@@ -63,6 +63,9 @@ class CameraOverlayService : Service() {
     private var displayedFile: File? = null
     private val handledFilePaths = mutableSetOf<String>()
     private val popupQueuedOrShownPaths = mutableSetOf<String>()
+    // Tiene traccia dei nomi provvisori già riconosciuti: alcune fotocamere
+    // rinominano il file anche dopo che il popup è stato chiuso.
+    private val handledPathsAwaitingRename = mutableSetOf<String>()
     private val completedFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
     private var pendingPopupFile: File? = null
@@ -169,12 +172,24 @@ class CameraOverlayService : Service() {
         // Motorola può scrivere su un nome provvisorio e poi rinominare la foto.
         // Seguiamo MOVED_FROM/MOVED_TO per aggiornare il riferimento usato dal popup.
         if (isMovedFrom) {
-            if (path == displayedPath) displayedFileWasMoved = true
+            if (path == displayedPath) {
+                displayedFileWasMoved = true
+                handledPathsAwaitingRename.add(path)
+            }
             if (pendingPopupFile?.let { filePath(it) } == path) pendingPopupWasMoved = true
+            if (handledFilePaths.contains(path) || popupQueuedOrShownPaths.contains(path)) {
+                handledPathsAwaitingRename.add(path)
+            }
             return
         }
 
         if (isMovedTo && file.isFile && file.length() > 0L) {
+            if (handledPathsAwaitingRename.remove(path)) {
+                handledFilePaths.add(filePath(file))
+                popupQueuedOrShownPaths.add(filePath(file))
+                completedFilePaths.add(filePath(file))
+                return
+            }
             if (overlay != null && displayedFileWasMoved) {
                 displayedFile = file
                 displayedFileWasMoved = false
@@ -857,6 +872,9 @@ class CameraOverlayService : Service() {
             val path = filePath(file)
             handledFilePaths.add(path)
             popupQueuedOrShownPaths.add(path)
+            // Se il nome provvisorio viene rinominato dopo la chiusura,
+            // handleCameraFileEvent trasferirà la protezione al nome finale.
+            handledPathsAwaitingRename.add(path)
         }
         displayedFile = null
         displayedFileWasMoved = false
