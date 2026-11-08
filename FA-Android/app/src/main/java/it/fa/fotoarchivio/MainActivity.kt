@@ -312,7 +312,9 @@ class MainActivity : ComponentActivity() {
                 intArrayOf(0xFF10191F.toInt(), 0xFF182128.toInt(), 0xFF0C1217.toInt())
             )
             val watermarkBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_home_image)
-            val watermarkWidth = dp(290)
+            // Il PNG originale resta invariato; viene solo mostrato più piccolo
+            // per mantenere margine laterale su tutti gli schermi.
+            val watermarkWidth = dp(250)
             val watermarkHeight = if (watermarkBitmap.width > 0)
                 (watermarkWidth * watermarkBitmap.height.toFloat() / watermarkBitmap.width).toInt()
             else watermarkWidth
@@ -320,10 +322,21 @@ class MainActivity : ComponentActivity() {
                 alpha = 42
                 gravity = Gravity.CENTER
             }
-            background = LayerDrawable(arrayOf(base, watermark)).apply {
+            // Cinepresa vintage separata in WebP trasparente: non ricostruisce
+            // né sostituisce il PNG fotografico originale.
+            val movieCameraBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_vintage_movie_camera)
+            val movieCamera = android.graphics.drawable.BitmapDrawable(resources, movieCameraBitmap).apply {
+                alpha = 165
+                gravity = Gravity.TOP or Gravity.LEFT
+            }
+            background = LayerDrawable(arrayOf(base, watermark, movieCamera)).apply {
                 setLayerGravity(1, Gravity.CENTER)
                 setLayerWidth(1, watermarkWidth)
                 setLayerHeight(1, watermarkHeight)
+                setLayerGravity(2, Gravity.TOP or Gravity.LEFT)
+                setLayerWidth(2, dp(32))
+                setLayerHeight(2, dp(33))
+                setLayerInset(2, dp(12), dp(8), 0, 0)
             }
         }
         root.addView(TextView(this).apply {
