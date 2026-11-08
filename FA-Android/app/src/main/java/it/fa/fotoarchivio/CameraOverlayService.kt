@@ -358,10 +358,19 @@ class CameraOverlayService : Service() {
 
     private fun handleCameraFileEvent(file: File, event: Int) {
         val path = filePath(file)
+        val isCreate = (event and FileObserver.CREATE) != 0
         val isMovedFrom = (event and FileObserver.MOVED_FROM) != 0
         val isMovedTo = (event and FileObserver.MOVED_TO) != 0
         val isCompleteEvent = (event and (FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO)) != 0
         if (isCompleteEvent) completedFilePaths.add(path)
+
+        // Se il video precedente era stato rinominato in ritardo e il relativo
+        // MOVED_TO non è arrivato, non lasciare che il suo flag blocchi il video
+        // successivo. CREATE di un nuovo file video segna l'inizio di un nuovo ciclo.
+        if (isVideo(file) && isCreate &&
+            !handledFilePaths.contains(path) && !popupQueuedOrShownPaths.contains(path)) {
+            handledVideoAwaitingFinalRename = false
+        }
         if (isVideo(file) && isMovedTo) publishedVideoPaths.add(path)
 
         val displayedPath = displayedFile?.let { filePath(it) }
