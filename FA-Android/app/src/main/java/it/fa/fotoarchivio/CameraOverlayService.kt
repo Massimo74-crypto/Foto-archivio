@@ -81,6 +81,7 @@ class CameraOverlayService : Service() {
     }
     private var pendingPopupFile: File? = null
     private var pendingPopupWasMoved = false
+    private var pendingPopupMissingSinceMillis = 0L
     private var pendingPopupRunnable: Runnable? = null
     private var pendingVideoLastLength = -1L
     private var pendingVideoLastModified = -1L
@@ -234,9 +235,67 @@ class CameraOverlayService : Service() {
         }
     }
 
+    // Se Motorola rinomina il video senza consegnare MOVED_FROM/MOVED_TO,
+    // il percorso provvisorio scompare e il popup resterebbe bloccato su quel file.
+    // In questo caso cerchiamo il nuovo file definitivo nella cartella della fotocamera.
+    private fun recoverPendingPopupFile() {
+        val pending = pendingPopupFile ?: return
+        if (overlay != null) return
+        val pendingPath = filePath(pending)
+        if (pending.isFile) {
+            pendingPopupMissingSinceMillis = 0L
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (pendingPopupMissingSinceMillis == 0L) pendingPopupMissingSinceMillis = now
+        val cameraDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            "Camera"
+        )
+        val sessionStartMillis = (sessionStartSeconds - 10L).coerceAtLeast(0L) * 1000L
+        val replacement = cameraDir.listFiles()
+            ?.asSequence()
+            ?.filter { file ->
+                file.isFile && file.length() > 0L &&
+                    file.lastModified() >= sessionStartMillis &&
+                    filePath(file) != pendingPath && isCameraMedia(file) &&
+                    !handledFilePaths.contains(filePath(file)) &&
+                    !popupQueuedOrShownPaths.contains(filePath(file))
+            }
+            ?.sortedByDescending { it.lastModified() }
+            ?.firstOrNull()
+
+        if (replacement != null) {
+            popupQueuedOrShownPaths.remove(pendingPath)
+            pendingPopupFile = replacement
+            pendingPopupWasMoved = false
+            pendingPopupMissingSinceMillis = 0L
+            pendingVideoLastLength = -1L
+            pendingVideoLastModified = -1L
+            pendingVideoStableChecks = 0
+            photoDateTakenMillis = replacement.lastModified().takeIf { it > 0L }
+            return
+        }
+
+        // Non lasciare che un percorso provvisorio inesistente blocchi FA a tempo indeterminato.
+        if (now - pendingPopupMissingSinceMillis >= 8000L) {
+            pendingPopupRunnable?.let { handler.removeCallbacks(it) }
+            pendingPopupRunnable = null
+            popupQueuedOrShownPaths.remove(pendingPath)
+            pendingPopupFile = null
+            pendingPopupWasMoved = false
+            pendingPopupMissingSinceMillis = 0L
+            pendingVideoLastLength = -1L
+            pendingVideoLastModified = -1L
+            pendingVideoStableChecks = 0
+        }
+    }
+
     // Seconda rete di sicurezza: controlla direttamente i file presenti in
     // DCIM/Camera, senza dipendere dall'indicizzazione o dalle notifiche MediaStore.
     private fun scanCameraDirectory() {
+        recoverPendingPopupFile()
         if (overlay != null || pendingPopupFile != null) return
         val cameraDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
@@ -359,6 +418,7 @@ class CameraOverlayService : Service() {
 
         popupQueuedOrShownPaths.add(path)
         pendingPopupFile = file
+        pendingPopupMissingSinceMillis = 0L
         pendingVideoLastLength = -1L
         pendingVideoLastModified = -1L
         pendingVideoStableChecks = 0
@@ -386,6 +446,7 @@ class CameraOverlayService : Service() {
             }
             pendingPopupFile = null
             pendingPopupWasMoved = false
+            pendingPopupMissingSinceMillis = 0L
             pendingPopupRunnable = null
             pendingVideoLastLength = -1L
             pendingVideoLastModified = -1L
@@ -1019,6 +1080,7 @@ class CameraOverlayService : Service() {
             }
             pendingPopupFile = null
             pendingPopupWasMoved = false
+            pendingPopupMissingSinceMillis = 0L
             pendingVideoLastLength = -1L
             pendingVideoLastModified = -1L
             pendingVideoStableChecks = 0
