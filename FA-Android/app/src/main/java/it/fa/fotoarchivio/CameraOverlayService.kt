@@ -202,7 +202,7 @@ class CameraOverlayService : Service() {
                     var checked = 0
                     while (cursor.moveToNext() && checked++ < 25) {
                         val path = cursor.getString(pathColumn) ?: continue
-                        val normalized = path.replace('\\\\', '/')
+                        val normalized = path.replace(File.separatorChar, '/')
                         if (!normalized.contains("/DCIM/", ignoreCase = true)) continue
                         val file = File(path)
                         if (!file.isFile || file.length() <= 0L || !isCameraMedia(file)) continue
