@@ -159,7 +159,7 @@ class MainActivity : ComponentActivity() {
     private fun resetArchiveForNextVersion() {
         val storage = Environment.getExternalStorageDirectory()
         val photoRoot = File(storage, "Pictures/FotoArchivio")
-        val marker = File(photoRoot, ".fa_archivio_azzerato_v2")
+        val marker = File(photoRoot, ".fa_reset_060_done")
         if (marker.exists()) return
         val faOwnedRoots = listOf(
             photoRoot,
