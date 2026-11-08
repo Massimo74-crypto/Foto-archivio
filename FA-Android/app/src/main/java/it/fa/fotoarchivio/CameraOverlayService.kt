@@ -73,6 +73,10 @@ class CameraOverlayService : Service() {
     private var pendingPopupFile: File? = null
     private var pendingPopupWasMoved = false
     private var pendingPopupRunnable: Runnable? = null
+    private var pendingVideoLastLength = -1L
+    private var pendingVideoLastModified = -1L
+    private var pendingVideoStableChecks = 0
+    private var handledVideoAwaitingFinalRename = false
     private var displayedFileWasMoved = false
     private var sourceReadyForSave = false
     private var archiveCopyInProgress = false
@@ -240,6 +244,9 @@ class CameraOverlayService : Service() {
         // Motorola può scrivere su un nome provvisorio e poi rinominare la foto.
         // Seguiamo MOVED_FROM/MOVED_TO per aggiornare il riferimento usato dal popup.
         if (isMovedFrom) {
+            if (isVideo(file) && (handledFilePaths.contains(path) || popupQueuedOrShownPaths.contains(path) || path == displayedPath)) {
+                handledVideoAwaitingFinalRename = true
+            }
             if (path == displayedPath) {
                 displayedFileWasMoved = true
                 handledPathsAwaitingRename.add(path)
@@ -252,6 +259,15 @@ class CameraOverlayService : Service() {
         }
 
         if (isMovedTo && file.isFile && file.length() > 0L) {
+            // Se l'utente ha chiuso il popup mentre il video era ancora in registrazione,
+            // la fotocamera può rinominare il file allo Stop: non riaprire il popup.
+            if (isVideo(file) && handledVideoAwaitingFinalRename) {
+                handledFilePaths.add(path)
+                popupQueuedOrShownPaths.add(path)
+                completedFilePaths.add(path)
+                handledVideoAwaitingFinalRename = false
+                return
+            }
             if (overlay != null && displayedFileWasMoved) {
                 displayedFile = file
                 displayedFileWasMoved = false
@@ -306,18 +322,37 @@ class CameraOverlayService : Service() {
 
         popupQueuedOrShownPaths.add(path)
         pendingPopupFile = file
+        pendingVideoLastLength = -1L
+        pendingVideoLastModified = -1L
+        pendingVideoStableChecks = 0
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
         val show = Runnable {
-            // Durante i 500 ms il file potrebbe essere stato rinominato.
+            // Per i video attendiamo che dimensione e data di modifica restino
+            // invariate per 4 controlli consecutivi: alcuni firmware Motorola
+            // emettono CLOSE_WRITE anche durante l'avvio della registrazione.
             val currentFile = pendingPopupFile ?: return@Runnable
             val currentPath = filePath(currentFile)
-            if (isVideo(currentFile) && !completedFilePaths.contains(currentPath)) {
-                pendingPopupRunnable?.let { handler.postDelayed(it, 500L) }
-                return@Runnable
+            if (isVideo(currentFile)) {
+                val length = currentFile.length()
+                val modified = currentFile.lastModified()
+                if (length > 0L && length == pendingVideoLastLength && modified == pendingVideoLastModified) {
+                    pendingVideoStableChecks++
+                } else {
+                    pendingVideoStableChecks = 0
+                }
+                pendingVideoLastLength = length
+                pendingVideoLastModified = modified
+                if (pendingVideoStableChecks < 4) {
+                    pendingPopupRunnable?.let { handler.postDelayed(it, 1000L) }
+                    return@Runnable
+                }
             }
             pendingPopupFile = null
             pendingPopupWasMoved = false
             pendingPopupRunnable = null
+            pendingVideoLastLength = -1L
+            pendingVideoLastModified = -1L
+            pendingVideoStableChecks = 0
             if (overlay != null || handledFilePaths.contains(currentPath) || !currentFile.exists()) return@Runnable
             sourceReadyForSave = completedFilePaths.contains(currentPath) && currentFile.length() > 0L
             photoDateTakenMillis = currentFile.lastModified().takeIf { it > 0L }
@@ -947,6 +982,9 @@ class CameraOverlayService : Service() {
             }
             pendingPopupFile = null
             pendingPopupWasMoved = false
+            pendingVideoLastLength = -1L
+            pendingVideoLastModified = -1L
+            pendingVideoStableChecks = 0
         }
         val panel = overlay
         // Azzera prima lo stato: nessun controllo successivo deve considerare
@@ -1000,6 +1038,9 @@ class CameraOverlayService : Service() {
         pendingPopupRunnable = null
         pendingPopupFile = null
         pendingPopupWasMoved = false
+        pendingVideoLastLength = -1L
+        pendingVideoLastModified = -1L
+        pendingVideoStableChecks = 0
         dismissOverlay(markAsHandled = false)
         stopLocationUpdates()
         stopForeground(STOP_FOREGROUND_REMOVE)
