@@ -75,6 +75,7 @@ class CameraOverlayService : Service() {
     private val cameraScanRunnable = object : Runnable {
         override fun run() {
             scanRecentCameraMedia()
+            scanCameraDirectory()
             handler.postDelayed(this, 1000L)
         }
     }
@@ -231,6 +232,29 @@ class CameraOverlayService : Service() {
                 }
             } catch (_: Exception) { }
         }
+    }
+
+    // Seconda rete di sicurezza: controlla direttamente i file presenti in
+    // DCIM/Camera, senza dipendere dall'indicizzazione o dalle notifiche MediaStore.
+    private fun scanCameraDirectory() {
+        if (overlay != null || pendingPopupFile != null) return
+        val cameraDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            "Camera"
+        )
+        val files = cameraDir.listFiles() ?: return
+        val sessionStartMillis = (sessionStartSeconds - 10L).coerceAtLeast(0L) * 1000L
+        files.asSequence()
+            .filter { it.isFile && it.lastModified() >= sessionStartMillis && isCameraMedia(it) }
+            .sortedByDescending { it.lastModified() }
+            .take(30)
+            .forEach { file ->
+                val key = filePath(file)
+                if (handledFilePaths.contains(key) || popupQueuedOrShownPaths.contains(key)) return@forEach
+                if (file.length() <= 0L) return@forEach
+                handleCameraFileEvent(file, FileObserver.CREATE)
+                if (pendingPopupFile != null || overlay != null) return
+            }
     }
 
     private fun isCameraMedia(file: File): Boolean =
