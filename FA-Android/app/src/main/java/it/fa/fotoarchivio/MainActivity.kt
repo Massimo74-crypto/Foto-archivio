@@ -1289,6 +1289,7 @@ class MainActivity : ComponentActivity() {
                     saveFolderList(explorerCategory, folders(explorerCategory).filterNot { it == path || it.startsWith(path + "/") })
                 }
                 selectedFolders.clear(); selectedPhotos.clear()
+                invalidateArchiveCaches()
                 toast(deleted.toString() + " elementi eliminati")
                 showExplorerFolder()
             }.show()
@@ -1361,6 +1362,7 @@ class MainActivity : ComponentActivity() {
                     saveFolderList(sourceCategory, sourceList.toList())
                     if (category != sourceCategory) saveFolderList(category, targetList.toList())
                     prefs.edit().putString("fa_last_move_destination", category + "/" + destinationFolder).apply()
+                    invalidateArchiveCaches()
                     selectedFolders.clear(); selectedPhotos.clear()
                     explorerCategory = category; explorerFolder = destinationFolder
                     prefs.edit().putString(lastFolderKey(category), destinationFolder).apply()
