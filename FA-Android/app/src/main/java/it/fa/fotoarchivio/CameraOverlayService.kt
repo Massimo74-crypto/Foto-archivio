@@ -835,3 +835,4 @@ class CameraOverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 }
+// Build verification: archive save runs on a worker and reports only verified completion.
