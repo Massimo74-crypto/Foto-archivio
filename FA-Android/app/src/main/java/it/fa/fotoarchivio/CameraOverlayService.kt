@@ -72,6 +72,10 @@ class CameraOverlayService : Service() {
     private var pendingSaveFile: File? = null
     private var pendingSaveLastLength = -1L
     private var pendingSaveStableChecks = 0
+    private var readyCheckRunnable: Runnable? = null
+    private var readyCheckLastLength = -1L
+    private var readyCheckStableChecks = 0
+    private var readyCheckStartedAt = 0L
     private var category = "PERSONALE"
     private var folder = "Generale"
     private var sessionStartSeconds = 0L
@@ -157,9 +161,13 @@ class CameraOverlayService : Service() {
 
         val displayedPath = displayedFile?.let { filePath(it) }
         if (path == displayedPath) {
-            if (isCompleteEvent && pendingSaveFile?.let { filePath(it) } == path) {
+            if (isCompleteEvent && file.isFile && file.length() > 0L) {
                 sourceReadyForSave = true
-                handler.post { continuePendingSave(file) }
+                cancelReadinessCheck()
+                updateSaveButtonState(true)
+                if (pendingSaveFile?.let { filePath(it) } == path) {
+                    handler.post { continuePendingSave(file) }
+                }
             }
             return
         }
@@ -194,10 +202,80 @@ class CameraOverlayService : Service() {
         if (overlay == null || !saveInProgress || pendingSaveFile?.let { filePath(it) } != filePath(file)) return
         if (!file.isFile || file.length() <= 0L) return
         sourceReadyForSave = true
+        cancelReadinessCheck()
+        updateSaveButtonState(true, saving = true)
         pendingSaveFile = null
         pendingSaveLastLength = -1L
         pendingSaveStableChecks = 0
         savePhotoToArchive()
+    }
+
+    // Il pulsante diventa verde e cliccabile solo quando il file originale
+    // è stato chiuso dalla fotocamera o la sua dimensione è rimasta stabile.
+    private fun updateSaveButtonState(ready: Boolean, saving: Boolean = false) {
+        saveButton?.apply {
+            isEnabled = ready && !saving
+            text = when {
+                saving -> "SALVATAGGIO…"
+                ready -> "SALVA IN FA"
+                else -> "ATTENDI FOTO…"
+            }
+            alpha = if (ready && !saving) 1.0f else 0.72f
+            backgroundTintList = android.content.res.ColorStateList.valueOf(
+                if (ready && !saving) 0xFF2EAD62.toInt() else 0xFF667781.toInt()
+            )
+            setTextColor(0xFFFFFFFF.toInt())
+        }
+    }
+
+    private fun cancelReadinessCheck() {
+        readyCheckRunnable?.let { handler.removeCallbacks(it) }
+        readyCheckRunnable = null
+        readyCheckLastLength = -1L
+        readyCheckStableChecks = 0
+        readyCheckStartedAt = 0L
+    }
+
+    private fun startReadinessCheck(file: File) {
+        cancelReadinessCheck()
+        readyCheckStartedAt = System.currentTimeMillis()
+        val path = filePath(file)
+        val check = object : Runnable {
+            override fun run() {
+                if (overlay == null || displayedFile?.let { filePath(it) } != path) return
+                val length = if (file.isFile) file.length() else 0L
+                if (completedFilePaths.contains(path) && length > 0L) {
+                    sourceReadyForSave = true
+                    cancelReadinessCheck()
+                    updateSaveButtonState(true)
+                    return
+                }
+                if (length > 0L) {
+                    if (length == readyCheckLastLength) readyCheckStableChecks++
+                    else readyCheckStableChecks = 0
+                    readyCheckLastLength = length
+                } else {
+                    readyCheckLastLength = -1L
+                    readyCheckStableChecks = 0
+                }
+                // Fallback per i dispositivi che non consegnano CLOSE_WRITE.
+                if (length > 0L && readyCheckStableChecks >= 8) {
+                    completedFilePaths.add(path)
+                    sourceReadyForSave = true
+                    cancelReadinessCheck()
+                    updateSaveButtonState(true)
+                    return
+                }
+                if (System.currentTimeMillis() - readyCheckStartedAt >= 30000L) {
+                    readyCheckRunnable = null
+                    saveButton?.apply { isEnabled = false; text = "FILE NON PRONTO" }
+                    return
+                }
+                handler.postDelayed(this, 100L)
+            }
+        }
+        readyCheckRunnable = check
+        handler.postDelayed(check, 100L)
     }
 
     private fun createNotificationChannel() {
@@ -423,12 +501,12 @@ class CameraOverlayService : Service() {
             setOnClickListener { showFolderPicker() }
         }
         val save = Button(this).apply {
-            text = "SALVA IN FA"
+            text = if (sourceReadyForSave) "SALVA IN FA" else "ATTENDI FOTO…"
             isAllCaps = false
             setOnClickListener {
-                if (!saveInProgress) {
+                if (!saveInProgress && sourceReadyForSave) {
                     saveInProgress = true
-                    isEnabled = false
+                    updateSaveButtonState(true, saving = true)
                     savePhotoToArchive()
                 }
             }
@@ -453,6 +531,11 @@ class CameraOverlayService : Service() {
         try {
             windowManager.addView(panel, params)
             overlay = panel
+            if (sourceReadyForSave) updateSaveButtonState(true)
+            else {
+                updateSaveButtonState(false)
+                startReadinessCheck(sourceFile)
+            }
             panel.isFocusableInTouchMode = true
             input.requestFocus()
             input.post {
@@ -619,10 +702,7 @@ class CameraOverlayService : Service() {
             pendingSaveLastLength = -1L
             pendingSaveStableChecks = 0
             pendingSaveStartedAt = 0L
-            saveButton?.apply {
-                isEnabled = true
-                text = "SALVA IN FA"
-            }
+            updateSaveButtonState(sourceReadyForSave)
             Toast.makeText(this, "La foto non risulta ancora completa. Riprova SALVA.", Toast.LENGTH_LONG).show()
             return
         }
@@ -630,6 +710,7 @@ class CameraOverlayService : Service() {
     }
 
     private fun dismissOverlay(markAsHandled: Boolean) {
+        cancelReadinessCheck()
         val panel = overlay
         // Azzera prima lo stato: nessun controllo successivo deve considerare
         // ancora aperta la finestra appena salvata.
@@ -684,6 +765,7 @@ class CameraOverlayService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        cancelReadinessCheck()
         cameraDirectoryObserver?.stopWatching()
         cameraDirectoryObserver = null
         stopLocationUpdates()
