@@ -114,6 +114,25 @@ class CameraOverlayService : Service() {
     private var folderLabel: TextView? = null
     private var gpsDiagnostic: String = "GPS non ancora verificato"
     private var saveStatusLabel: TextView? = null
+    private val diagnosticLock = Any()
+    private var diagnosticFile: File? = null
+
+    // Diagnostica temporanea: scrive in Download/FA_diagnostica_video.txt.
+    private fun diagnostic(message: String) {
+        try {
+            synchronized(diagnosticLock) {
+                val target = diagnosticFile ?: File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "FA_diagnostica_video.txt"
+                ).also {
+                    it.parentFile?.mkdirs()
+                    diagnosticFile = it
+                }
+                val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
+                target.appendText("$stamp | $message\\n", Charsets.UTF_8)
+            }
+        } catch (_: Exception) { }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -149,6 +168,7 @@ class CameraOverlayService : Service() {
             }
         }
         startLocationCapture()
+        diagnostic("SESSIONE AVVIATA; categoria=$category; cartella=$folder; Android=${Build.VERSION.SDK_INT}")
         startCameraDirectoryObserver()
         return START_NOT_STICKY
     }
@@ -180,6 +200,7 @@ class CameraOverlayService : Service() {
         }
 
         val cameraDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera")
+        diagnostic("AVVIO OSSERVATORE; directory=${cameraDir.absolutePath}; exists=${cameraDir.exists()}; isDirectory=${cameraDir.isDirectory}")
         if (!cameraDir.exists() || !cameraDir.isDirectory) return
         try {
             cameraDirectoryObserver?.stopWatching()
@@ -191,10 +212,12 @@ class CameraOverlayService : Service() {
                     if (path.isNullOrBlank()) return
                     val file = File(cameraDir, path)
                     if (!isCameraMedia(file)) return
+                    diagnostic("FILE_OBSERVER event=$event path=${file.name} exists=${file.exists()} bytes=${if (file.exists()) file.length() else -1L}")
                     handler.post { handleCameraFileEvent(file, event) }
                 }
             }.also { it.startWatching() }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            diagnostic("ERRORE FILE_OBSERVER: ${e.javaClass.simpleName}: ${e.localizedMessage}")
             cameraDirectoryObserver = null
         }
 
@@ -249,7 +272,11 @@ class CameraOverlayService : Service() {
                             val durationColumn = cursor.getColumnIndex(MediaStore.Video.VideoColumns.DURATION)
                             val stillPending = pendingColumn >= 0 && cursor.getInt(pendingColumn) != 0
                             val duration = if (durationColumn >= 0) cursor.getLong(durationColumn) else 0L
-                            if (stillPending || duration <= 0L) continue
+                            if (stillPending || duration <= 0L) {
+                                diagnostic("MEDIASTORE video non pronto; file=${file.name}; pending=$stillPending; duration=$duration; bytes=${file.length()}")
+                                continue
+                            }
+                            diagnostic("MEDIASTORE video PUBBLICATO; file=${file.name}; duration=$duration; bytes=${file.length()}")
                             publishedVideoPaths.add(key)
                             completedFilePaths.add(key)
                             // MediaStore conferma che questo è un video definitivo:
@@ -388,6 +415,7 @@ class CameraOverlayService : Service() {
         val isMovedTo = (event and FileObserver.MOVED_TO) != 0
         val isCloseWrite = (event and FileObserver.CLOSE_WRITE) != 0
         val isCompleteEvent = (event and (FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO)) != 0
+        diagnostic("GESTIONE EVENTO event=$event file=${file.name}; video=${isVideo(file)}; bytes=${if (file.exists()) file.length() else -1L}; overlay=${overlay != null}; pending=${pendingPopupFile?.name}")
         if (isCompleteEvent) completedFilePaths.add(path)
         // CLOSE_WRITE è il segnale più vicino allo Stop disponibile a FA:
         // avvia la verifica rapida, ma il file deve anche risultare riproducibile.
@@ -480,7 +508,10 @@ class CameraOverlayService : Service() {
             return
         }
         val isNewFileEvent = (event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0
-        if (!isNewFileEvent || !file.exists()) return
+        if (!isNewFileEvent || !file.exists()) {
+            diagnostic("IGNORATO: non è CREATE/MOVED_TO o file assente; file=${file.name}")
+            return
+        }
         val existingPending = pendingPopupFile
         if (existingPending != null) {
             val existingPath = filePath(existingPending)
@@ -504,6 +535,7 @@ class CameraOverlayService : Service() {
             popupQueuedOrShownPaths.add(path)
             pendingPopupFile = file
         }
+        diagnostic("CANDIDATO POPUP; file=${file.name}; video=${isVideo(file)}; event=$event")
         pendingPopupMissingSinceMillis = 0L
         pendingVideoLastLength = -1L
         pendingVideoLastModified = -1L
@@ -518,6 +550,7 @@ class CameraOverlayService : Service() {
             val currentPath = filePath(currentFile)
             if (isVideo(currentFile)) {
                 if (!publishedVideoPaths.contains(currentPath)) {
+                    diagnostic("ATTESA PUBBLICAZIONE VIDEO; file=${currentFile.name}; bytes=${if (currentFile.exists()) currentFile.length() else -1L}")
                     // Non lasciare un video senza evento di completamento in attesa
                     // per sempre: altrimenti blocca tutti i video successivi.
                     if (pendingVideoWaitStartedAt == 0L) pendingVideoWaitStartedAt = System.currentTimeMillis()
@@ -551,10 +584,12 @@ class CameraOverlayService : Service() {
                     return@Runnable
                 }
                 if (!isReadableCompletedVideo(currentFile)) {
+                    diagnostic("VIDEO NON ANCORA LEGGIBILE; file=${currentFile.name}; bytes=$length")
                     pendingPopupRunnable?.let { handler.postDelayed(it, 500L) }
                     return@Runnable
                 }
             }
+            diagnostic("APERTURA POPUP; file=${currentFile.name}; video=${isVideo(currentFile)}")
             pendingPopupFile = null
             pendingPopupWasMoved = false
             pendingPopupMissingSinceMillis = 0L
