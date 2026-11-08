@@ -328,16 +328,18 @@ class MainActivity : ComponentActivity() {
             val movieCameraBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_vintage_movie_camera)
             val movieCamera = android.graphics.drawable.BitmapDrawable(resources, movieCameraBitmap).apply {
                 alpha = 165
-                gravity = Gravity.TOP or Gravity.LEFT
+                gravity = Gravity.CENTER
             }
             background = LayerDrawable(arrayOf(base, watermark, movieCamera)).apply {
                 setLayerGravity(1, Gravity.CENTER)
                 setLayerWidth(1, watermarkWidth)
                 setLayerHeight(1, watermarkHeight)
-                setLayerGravity(2, Gravity.TOP or Gravity.LEFT)
+                // Offset rispetto al centro del drawable: la cinepresa resta
+                // agganciata all'angolo alto-sinistro del PNG centrato.
+                setLayerGravity(2, Gravity.CENTER)
                 setLayerWidth(2, dp(32))
                 setLayerHeight(2, dp(33))
-                setLayerInset(2, dp(12), dp(8), 0, 0)
+                setLayerInset(2, -dp(194), -dp(117), 0, 0)
             }
         }
         root.addView(TextView(this).apply {
