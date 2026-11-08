@@ -68,6 +68,9 @@ class CameraOverlayService : Service() {
     // rinominano il file anche dopo che il popup è stato chiuso.
     private val handledPathsAwaitingRename = mutableSetOf<String>()
     private val completedFilePaths = mutableSetOf<String>()
+    // Per i video, CLOSE_WRITE può arrivare anche durante la registrazione.
+    // Consideriamo definitivo solo MOVED_TO o la pubblicazione completata in MediaStore.
+    private val publishedVideoPaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
     private var mediaStoreObserver: ContentObserver? = null
     // Controllo periodico di sicurezza: alcune versioni della fotocamera Motorola
@@ -201,7 +204,7 @@ class CameraOverlayService : Service() {
     }
 
     private fun scanRecentCameraMedia() {
-        if (overlay != null || pendingPopupFile != null) return
+        if (overlay != null) return
         val since = (sessionStartSeconds - 5L).coerceAtLeast(0L).toString()
         val collections = listOf(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -209,9 +212,20 @@ class CameraOverlayService : Service() {
         )
         collections.forEach { collection ->
             try {
+                val isVideoCollection = collection == MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                val projection = if (isVideoCollection) {
+                    arrayOf(
+                        MediaStore.MediaColumns.DATA,
+                        MediaStore.MediaColumns.DATE_ADDED,
+                        MediaStore.MediaColumns.IS_PENDING,
+                        MediaStore.Video.VideoColumns.DURATION
+                    )
+                } else {
+                    arrayOf(MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED)
+                }
                 contentResolver.query(
                     collection,
-                    arrayOf(MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED),
+                    projection,
                     "${MediaStore.MediaColumns.DATE_ADDED} >= ?",
                     arrayOf(since),
                     "${MediaStore.MediaColumns.DATE_ADDED} DESC"
@@ -227,7 +241,20 @@ class CameraOverlayService : Service() {
                         if (!file.isFile || file.length() <= 0L || !isCameraMedia(file)) continue
                         val key = filePath(file)
                         if (handledFilePaths.contains(key) || popupQueuedOrShownPaths.contains(key)) continue
-                        handleCameraFileEvent(file, FileObserver.CREATE)
+                        if (isVideo(file)) {
+                            // Un video viene recuperato da MediaStore soltanto quando
+                            // Android lo ha pubblicato (IS_PENDING=0) e ne legge la durata.
+                            val pendingColumn = cursor.getColumnIndex(MediaStore.MediaColumns.IS_PENDING)
+                            val durationColumn = cursor.getColumnIndex(MediaStore.Video.VideoColumns.DURATION)
+                            val stillPending = pendingColumn >= 0 && cursor.getInt(pendingColumn) != 0
+                            val duration = if (durationColumn >= 0) cursor.getLong(durationColumn) else 0L
+                            if (stillPending || duration <= 0L) continue
+                            publishedVideoPaths.add(key)
+                            completedFilePaths.add(key)
+                            handleCameraFileEvent(file, FileObserver.MOVED_TO)
+                        } else {
+                            handleCameraFileEvent(file, FileObserver.CREATE)
+                        }
                         if (pendingPopupFile != null || overlay != null) return
                     }
                 }
@@ -334,6 +361,7 @@ class CameraOverlayService : Service() {
         val isMovedTo = (event and FileObserver.MOVED_TO) != 0
         val isCompleteEvent = (event and (FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO)) != 0
         if (isCompleteEvent) completedFilePaths.add(path)
+        if (isVideo(file) && isMovedTo) publishedVideoPaths.add(path)
 
         val displayedPath = displayedFile?.let { filePath(it) }
 
@@ -414,10 +442,28 @@ class CameraOverlayService : Service() {
         }
         val isNewFileEvent = (event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0
         if (!isNewFileEvent || !file.exists()) return
-        if (pendingPopupFile != null) return
-
-        popupQueuedOrShownPaths.add(path)
-        pendingPopupFile = file
+        val existingPending = pendingPopupFile
+        if (existingPending != null) {
+            val existingPath = filePath(existingPending)
+            if (isVideo(file) && publishedVideoPaths.contains(path) && path != existingPath) {
+                pendingPopupRunnable?.let { handler.removeCallbacks(it) }
+                popupQueuedOrShownPaths.remove(existingPath)
+                pendingPopupFile = file
+                pendingPopupWasMoved = false
+                pendingPopupMissingSinceMillis = 0L
+                pendingVideoLastLength = -1L
+                pendingVideoLastModified = -1L
+                pendingVideoStableChecks = 0
+                photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
+                // Il runnable già associato al candidato precedente viene riavviato
+                // sul percorso definitivo, senza creare un secondo popup.
+            } else {
+                return
+            }
+        } else {
+            popupQueuedOrShownPaths.add(path)
+            pendingPopupFile = file
+        }
         pendingPopupMissingSinceMillis = 0L
         pendingVideoLastLength = -1L
         pendingVideoLastModified = -1L
@@ -430,6 +476,12 @@ class CameraOverlayService : Service() {
             val currentFile = pendingPopupFile ?: return@Runnable
             val currentPath = filePath(currentFile)
             if (isVideo(currentFile)) {
+                // La stabilità da sola non prova che la registrazione sia terminata:
+                // una pausa temporanea di scrittura può durare diversi secondi.
+                if (!publishedVideoPaths.contains(currentPath)) {
+                    pendingPopupRunnable?.let { handler.postDelayed(it, 1000L) }
+                    return@Runnable
+                }
                 val length = currentFile.length()
                 val modified = currentFile.lastModified()
                 if (length > 0L && length == pendingVideoLastLength && modified == pendingVideoLastModified) {
