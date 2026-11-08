@@ -410,6 +410,7 @@ class MainActivity : ComponentActivity() {
             bottomMargin = dp(12)
         })
 
+        root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(TextView(this).apply {
             text = "Creato da M@xm@so74 con ChatGPT"
             textSize = 16f
@@ -1022,15 +1023,9 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putString(lastFolderKey(explorerCategory), current).apply()
             importLauncher.launch(arrayOf("image/*", "video/*"))
         }, LinearLayout.LayoutParams(-1, dp(48)))
-        if (current.isNotBlank()) {
-            root.addView(actionButton("↑ CARTELLA SUPERIORE") {
-                explorerFolder = current.substringBeforeLast('/', "")
-                prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
-                showExplorerFolder()
-            }, LinearLayout.LayoutParams(-1, dp(42)))
-        } else {
+        if (current.isBlank()) {
             root.addView(actionButton("← GESTIONE ARCHIVIO") { showFileManager() },
-                LinearLayout.LayoutParams(-1, dp(42)))
+                LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(4) })
         }
 
         val children = folderChildren(explorerCategory, current)
@@ -1071,6 +1066,9 @@ class MainActivity : ComponentActivity() {
                 setPadding(dp(8), dp(10), dp(8), dp(10))
             }
             val folderCheck = CheckBox(this).apply {
+                text = "MULTI-SELEZIONE"
+                textSize = 10f
+                setTextColor(0xFFC7B9A7.toInt())
                 buttonTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
                 isChecked = selectedFolders.contains(fullPath)
                 setOnCheckedChangeListener { _, checked ->
