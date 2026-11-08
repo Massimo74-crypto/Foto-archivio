@@ -450,7 +450,7 @@ class CameraOverlayService : Service() {
             contentDescription = "Chiudi senza salvare"
             isAllCaps = false
             minWidth = dp(44)
-            setOnClickListener { dismissOverlay(markAsHandled = true) }
+            setOnClickListener {\n                if (saveInProgress) Toast.makeText(this@CameraOverlayService, "Attendi la fine del salvataggio", Toast.LENGTH_SHORT).show()\n                else dismissOverlay(markAsHandled = true)\n            }
         }
         header.addView(close, LinearLayout.LayoutParams(dp(48), dp(44)))
         panel.addView(header)
@@ -498,7 +498,7 @@ class CameraOverlayService : Service() {
         val changeFolder = Button(this).apply {
             text = "CAMBIA CARTELLA"
             isAllCaps = false
-            setOnClickListener { showFolderPicker() }
+            setOnClickListener { if (!saveInProgress) showFolderPicker() }
         }
         val save = Button(this).apply {
             text = if (sourceReadyForSave) "SALVA IN FA" else "ATTENDI FOTO…"
@@ -617,57 +617,113 @@ class CameraOverlayService : Service() {
 
     private fun savePhotoToArchive() {
         val sourceFile = displayedFile
-        if (sourceFile != null && !sourceReadyForSave) {
+        if (sourceFile == null) {
+            saveInProgress = false
+            updateSaveButtonState(sourceReadyForSave)
+            Toast.makeText(this, "Foto sorgente non disponibile", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!sourceReadyForSave) {
             if (pendingSaveFile?.let { filePath(it) } != filePath(sourceFile)) {
                 pendingSaveLastLength = -1L
                 pendingSaveStableChecks = 0
             }
             pendingSaveFile = sourceFile
             if (pendingSaveStartedAt == 0L) pendingSaveStartedAt = System.currentTimeMillis()
-            saveButton?.text = "ATTENDI FOTO…"
+            updateSaveButtonState(false, saving = true)
             waitForCameraFileClose(sourceFile)
             return
         }
-        if (sourceFile == null) return
+
         val requestedName = safeName(nameInput?.text?.toString().orEmpty())
-        val sourceName = sourceFile.name
-        val extension = sourceName.substringAfterLast('.', "jpg")
-            .lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "").ifBlank { "jpg" }
-        val segments = folder.trim('/').split('/').filter { it.isNotBlank() }.map { safeName(it) }
-        val destinationDir = File(
-            Environment.getExternalStorageDirectory(),
-            "Pictures/FotoArchivio/$category/${segments.joinToString("/")}"
-        )
-        val baseName = if (requestedName.isBlank()) {
-            nextAutomaticPhotoName(destinationDir, extension)
-        } else requestedName
-        val destination = File(destinationDir, "$baseName.$extension")
-        try {
-            destinationDir.mkdirs()
-            if (destination.exists()) {
-                nameInput?.error = "Nome già presente in questa cartella"
-                saveInProgress = false
-                saveButton?.isEnabled = true
-                return
+        val categorySnapshot = category.takeIf { it == "PERSONALE" || it == "LAVORO" } ?: "PERSONALE"
+        val folderSnapshot = folder.trim('/').split('/').filter { it.isNotBlank() }
+            .map { safeName(it) }.filter { it.isNotBlank() }
+        val extension = sourceFile.extension.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]"), "").ifBlank { "jpg" }
+        val sourcePath = filePath(sourceFile)
+
+        // La copia e la scrittura EXIF avvengono fuori dal thread grafico.
+        // Il popup resta in "SALVATAGGIO…" solo finché la copia verificata non termina.
+        Thread({
+            var temporaryFile: File? = null
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+                    throw SecurityException("Autorizzazione archivio non attiva")
+                }
+                val archiveRoot = File(Environment.getExternalStorageDirectory(), "Pictures/FotoArchivio")
+                val destinationDir = File(archiveRoot, categorySnapshot + File.separator + folderSnapshot.joinToString(File.separator))
+                val rootCanonical = archiveRoot.canonicalFile
+                val dirCanonical = destinationDir.canonicalFile
+                if (dirCanonical.path != rootCanonical.path &&
+                    !dirCanonical.path.startsWith(rootCanonical.path + File.separator)) {
+                    throw SecurityException("Percorso archivio non valido")
+                }
+                if (!destinationDir.exists() && !destinationDir.mkdirs()) {
+                    throw java.io.IOException("Non riesco a creare la cartella di archivio")
+                }
+                if (!destinationDir.isDirectory || !destinationDir.canWrite()) {
+                    throw java.io.IOException("Cartella archivio non accessibile in scrittura")
+                }
+
+                val baseName = if (requestedName.isBlank()) {
+                    nextAutomaticPhotoName(destinationDir, extension)
+                } else requestedName
+                val destination = File(destinationDir, "$baseName.$extension")
+                if (destination.exists()) throw java.io.IOException("Nome già presente in questa cartella")
+
+                if (!sourceFile.isFile || sourceFile.length() <= 0L) {
+                    throw java.io.IOException("Foto originale non ancora disponibile")
+                }
+                val sourceLengthBefore = sourceFile.length()
+                temporaryFile = File(destinationDir, ".$baseName.fa_tmp_${System.nanoTime()}.$extension")
+                sourceFile.inputStream().use { input ->
+                    FileOutputStream(temporaryFile).use { output ->
+                        input.copyTo(output)
+                        output.fd.sync()
+                    }
+                }
+                val sourceLengthAfter = sourceFile.length()
+                if (sourceLengthBefore != sourceLengthAfter || temporaryFile.length() != sourceLengthAfter) {
+                    throw java.io.IOException("La fotocamera sta ancora completando la foto: premi SALVA di nuovo")
+                }
+
+                writePhotoMetadata(temporaryFile)
+                if (destination.exists() || !temporaryFile.renameTo(destination)) {
+                    throw java.io.IOException("Non riesco a completare il trasferimento nell'archivio")
+                }
+                if (!destination.isFile || destination.length() != sourceLengthAfter) {
+                    destination.delete()
+                    throw java.io.IOException("Verifica finale della copia non riuscita")
+                }
+
+                handler.post {
+                    if (displayedFile?.let { filePath(it) } == sourcePath) {
+                        Toast.makeText(
+                            this,
+                            "Salvata come $baseName.$extension in FA/$categorySnapshot/${folderSnapshot.joinToString("/")}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        dismissOverlay(markAsHandled = true)
+                    }
+                }
+            } catch (e: Exception) {
+                try { temporaryFile?.delete() } catch (_: Exception) { }
+                handler.post {
+                    if (displayedFile?.let { filePath(it) } == sourcePath) {
+                        saveInProgress = false
+                        pendingSaveFile = null
+                        pendingSaveStartedAt = 0L
+                        updateSaveButtonState(sourceReadyForSave)
+                        Toast.makeText(
+                            this,
+                            "Salvataggio non riuscito: ${e.localizedMessage ?: e.javaClass.simpleName}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
-            if (!sourceFile.isFile || sourceFile.length() <= 0L)
-                throw IllegalStateException("Foto originale non ancora disponibile")
-            sourceFile.inputStream().use { source ->
-                FileOutputStream(destination).use { target -> source.copyTo(target) }
-            }
-            if (!destination.exists() || destination.length() == 0L) {
-                destination.delete()
-                throw IllegalStateException("Copia non riuscita")
-            }
-            writePhotoMetadata(destination)
-            val message = "Salvata come $baseName.$extension in FA/$category/$folder\n$gpsDiagnostic"
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-            dismissOverlay(markAsHandled = true)
-        } catch (e: Exception) {
-            saveInProgress = false
-            saveButton?.isEnabled = true
-            Toast.makeText(this, "Errore: ${e.localizedMessage ?: "salvataggio non riuscito"}", Toast.LENGTH_LONG).show()
-        }
+        }, "FA-archive-copy").start()
     }
 
     private fun waitForCameraFileClose(file: File) {
