@@ -1313,14 +1313,15 @@ class MainActivity : ComponentActivity() {
                     toast("Spostamento non riuscito: archivio ripristinato dove possibile")
                 } else {
                     val sourceList = folders(sourceCategory).toMutableSet()
-                    val targetList = folders(category).toMutableSet()
+                    val targetList = if (category == sourceCategory) sourceList else folders(category).toMutableSet()
                     folderRoots.forEach { oldPath ->
                         val newPath = if (destinationFolder.isBlank()) oldPath.substringAfterLast('/') else destinationFolder + "/" + oldPath.substringAfterLast('/')
                         sourceList.filter { it == oldPath || it.startsWith(oldPath + "/") }.forEach { old ->
                             sourceList.remove(old); targetList.add(newPath + old.removePrefix(oldPath))
                         }
                     }
-                    saveFolderList(sourceCategory, sourceList.toList()); saveFolderList(category, targetList.toList())
+                    saveFolderList(sourceCategory, sourceList.toList())
+                    if (category != sourceCategory) saveFolderList(category, targetList.toList())
                     prefs.edit().putString("fa_last_move_destination", category + "/" + destinationFolder).apply()
                     selectedFolders.clear(); selectedPhotos.clear()
                     explorerCategory = category; explorerFolder = destinationFolder
