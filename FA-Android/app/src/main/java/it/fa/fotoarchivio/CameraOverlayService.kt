@@ -148,7 +148,7 @@ class CameraOverlayService : Service() {
                 override fun onEvent(event: Int, path: String?) {
                     if (path.isNullOrBlank()) return
                     val file = File(cameraDir, path)
-                    if (!isCameraImage(file)) return
+                    if (!isCameraMedia(file)) return
                     handler.post { handleCameraFileEvent(file, event) }
                 }
             }.also { it.startWatching() }
@@ -157,8 +157,14 @@ class CameraOverlayService : Service() {
         }
     }
 
-    private fun isCameraImage(file: File): Boolean =
-        file.extension.lowercase(Locale.ROOT) in setOf("jpg", "jpeg", "png", "webp", "heic", "heif", "dng")
+    private fun isCameraMedia(file: File): Boolean =
+        file.extension.lowercase(Locale.ROOT) in setOf(
+            "jpg", "jpeg", "png", "webp", "heic", "heif", "dng",
+            "mp4", "m4v", "3gp", "3gpp", "mov", "mkv", "webm"
+        )
+
+    private fun isVideo(file: File): Boolean =
+        file.extension.lowercase(Locale.ROOT) in setOf("mp4", "m4v", "3gp", "3gpp", "mov", "mkv", "webm")
 
     private fun filePath(file: File): String =
         try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
@@ -246,6 +252,10 @@ class CameraOverlayService : Service() {
             // Durante i 500 ms il file potrebbe essere stato rinominato.
             val currentFile = pendingPopupFile ?: return@Runnable
             val currentPath = filePath(currentFile)
+            if (isVideo(currentFile) && !completedFilePaths.contains(currentPath)) {
+                pendingPopupRunnable?.let { handler.postDelayed(it, 500L) }
+                return@Runnable
+            }
             pendingPopupFile = null
             pendingPopupWasMoved = false
             pendingPopupRunnable = null
@@ -277,7 +287,7 @@ class CameraOverlayService : Service() {
             text = when {
                 saving -> "SALVATAGGIO…"
                 ready -> "SALVA IN FA"
-                else -> "ATTENDI FOTO…"
+                else -> "ATTENDI FILE…"
             }
             alpha = if (ready && !saving) 1.0f else 0.72f
             backgroundTintList = android.content.res.ColorStateList.valueOf(
@@ -499,7 +509,7 @@ class CameraOverlayService : Service() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val destinationLabel = TextView(this).apply {
-            text = "FOTO SCATTATA  •  $category / $folder"
+            text = "${if (isVideo(sourceFile)) "VIDEO REGISTRATO" else "FOTO SCATTATA"}  •  $category / $folder"
             textSize = 14f
             setTextColor(0xFFF4EBDD.toInt())
             setPadding(0, 0, 0, dp(6))
@@ -544,7 +554,7 @@ class CameraOverlayService : Service() {
                 }
             }
         }.apply {
-            hint = "Nome della foto"
+            hint = if (isVideo(sourceFile)) "Nome del video" else "Nome della foto"
             isSingleLine = true
             isFocusable = true
             isFocusableInTouchMode = true
@@ -573,7 +583,7 @@ class CameraOverlayService : Service() {
             setOnClickListener { if (!saveInProgress) showFolderPicker() }
         }
         val save = Button(this).apply {
-            text = if (sourceReadyForSave) "SALVA IN FA" else "ATTENDI FOTO…"
+            text = if (sourceReadyForSave) "SALVA IN FA" else "ATTENDI FILE…"
             isAllCaps = false
             setOnClickListener {
                 if (!saveInProgress && sourceReadyForSave) {
@@ -639,12 +649,14 @@ class CameraOverlayService : Service() {
         val prefs = getSharedPreferences("fa_settings", Context.MODE_PRIVATE)
         val saved = prefs.getStringSet("folders_$targetCategory", emptySet())
             ?.toMutableSet() ?: mutableSetOf()
-        val root = File(Environment.getExternalStorageDirectory(),
-            "Pictures/FotoArchivio/$targetCategory")
-        if (root.exists()) {
-            root.walkTopDown().filter { it.isDirectory && it != root }.forEach { dir ->
-                val relative = dir.relativeTo(root).path.replace(File.separatorChar, '/').trim('/')
-                if (relative.isNotBlank() && !relative.startsWith(".FA_TEMP")) saved.add(relative)
+        listOf("Pictures", "Movies").forEach { mediaRoot ->
+            val root = File(Environment.getExternalStorageDirectory(),
+                "$mediaRoot/FotoArchivio/$targetCategory")
+            if (root.exists()) {
+                root.walkTopDown().filter { it.isDirectory && it != root }.forEach { dir ->
+                    val relative = dir.relativeTo(root).path.replace(File.separatorChar, '/').trim('/')
+                    if (relative.isNotBlank() && !relative.startsWith(".FA_TEMP")) saved.add(relative)
+                }
             }
         }
         return saved.sorted()
@@ -669,7 +681,7 @@ class CameraOverlayService : Service() {
                     .putString("active_category", category)
                     .putString("last_folder_$category", folder)
                     .apply()
-                folderLabel?.text = "FOTO SCATTATA  •  $category / $folder"
+                folderLabel?.text = "${if (displayedFile?.let(::isVideo) == true) "VIDEO REGISTRATO" else "FOTO SCATTATA"}  •  $category / $folder"
                 Toast.makeText(this, "Destinazione: $category / $folder", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Annulla", null)
@@ -684,8 +696,9 @@ class CameraOverlayService : Service() {
 
     private fun nextAutomaticPhotoName(directory: File, extension: String): String {
         var number = 1
-        while (File(directory, "foto$number.$extension").exists()) number++
-        return "foto$number"
+        val prefix = if (displayedFile?.let(::isVideo) == true) "video" else "foto"
+        while (File(directory, "$prefix$number.$extension").exists()) number++
+        return "$prefix$number"
     }
 
     private fun savePhotoToArchive() {
@@ -693,7 +706,7 @@ class CameraOverlayService : Service() {
         if (sourceFile == null) {
             saveInProgress = false
             updateSaveButtonState(sourceReadyForSave)
-            Toast.makeText(this, "Foto sorgente non disponibile", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "File sorgente non disponibile", Toast.LENGTH_LONG).show()
             return
         }
         if (!sourceReadyForSave) {
@@ -714,6 +727,7 @@ class CameraOverlayService : Service() {
             .map { safeName(it) }.filter { it.isNotBlank() }
         val extension = sourceFile.extension.lowercase(Locale.ROOT)
             .replace(Regex("[^a-z0-9]"), "").ifBlank { "jpg" }
+        val videoSnapshot = isVideo(sourceFile)
 
         if (archiveCopyInProgress) return
         val operationId = ++saveOperationId
@@ -727,7 +741,8 @@ class CameraOverlayService : Service() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
                     throw SecurityException("Autorizzazione archivio non attiva")
                 }
-                val archiveRoot = File(Environment.getExternalStorageDirectory(), "Pictures/FotoArchivio")
+                val archiveRoot = File(Environment.getExternalStorageDirectory(),
+                    "${if (videoSnapshot) "Movies" else "Pictures"}/FotoArchivio")
                 val destinationDir = File(archiveRoot, categorySnapshot + File.separator + folderSnapshot.joinToString(File.separator))
                 val rootCanonical = archiveRoot.canonicalFile
                 val dirCanonical = destinationDir.canonicalFile
@@ -773,7 +788,7 @@ class CameraOverlayService : Service() {
                 // La scrittura EXIF può cambiare la dimensione del file:
                 // la verifica finale deve confrontare il file rinominato con
                 // la dimensione effettiva del temporaneo DOPO i metadati.
-                writePhotoMetadata(tempFile)
+                if (!videoSnapshot) writePhotoMetadata(tempFile)
                 val expectedFinalLength = tempFile.length()
                 if (expectedFinalLength <= 0L) {
                     throw java.io.IOException("La copia temporanea è vuota dopo i metadati")

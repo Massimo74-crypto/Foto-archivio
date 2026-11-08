@@ -444,16 +444,10 @@ class MainActivity : ComponentActivity() {
             bottomMargin = dp(10)
         })
 
-        val captureButtons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        captureButtons.addView(actionButton("📷  SCATTA FOTO") {
+        root.addView(actionButton("📷  FOTOCAMERA") {
             launchCamera()
-        }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { rightMargin = dp(7) })
-        captureButtons.addView(actionButton("🎥  REGISTRA VIDEO") {
-            launchVideoCamera()
-        }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
-        root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(58)).apply {            bottomMargin = dp(12)
+        }, LinearLayout.LayoutParams(-1, dp(58)).apply {
+            bottomMargin = dp(12)
         })
 
         root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
@@ -606,9 +600,8 @@ class MainActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
             else startService(serviceIntent)
 
-            // Non usare resolveActivity(): su Android recenti la visibilità dei pacchetti
-            // può far risultare assente la fotocamera anche quando è installata.
-            // Prova direttamente ad aprire l'interfaccia completa della fotocamera.
+            // Avvia l'interfaccia completa della fotocamera predefinita: l'utente
+            // può scegliere Foto o Video dai controlli nativi del dispositivo.
             val cameraIntent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
             cameraSessionLaunched = true
             try {
