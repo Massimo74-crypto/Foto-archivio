@@ -62,6 +62,7 @@ class CameraOverlayService : Service() {
     private var saveInProgress = false
     private var displayedFile: File? = null
     private val handledFilePaths = mutableSetOf<String>()
+    private val popupQueuedOrShownPaths = mutableSetOf<String>()
     private val completedFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
     private var pendingPopupFile: File? = null
@@ -69,6 +70,8 @@ class CameraOverlayService : Service() {
     private var sourceReadyForSave = false
     private var pendingSaveStartedAt = 0L
     private var pendingSaveFile: File? = null
+    private var pendingSaveLastLength = -1L
+    private var pendingSaveStableChecks = 0
     private var category = "PERSONALE"
     private var folder = "Generale"
     private var sessionStartSeconds = 0L
@@ -160,16 +163,18 @@ class CameraOverlayService : Service() {
             }
             return
         }
-        if (handledFilePaths.contains(path) || overlay != null) return
-        if (event and (FileObserver.CREATE or FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO) == 0) return
-        if (!file.exists()) return
 
-        // CREATE è il segnale più vicino allo scatto che Android ci espone.
-        // Attende 500 ms per evitare falsi avvii, ma non aspetta la fine del file.
+        // CLOSE_WRITE serve solo a confermare che la foto è completa:
+        // non deve mai generare un secondo popup.
+        if (handledFilePaths.contains(path) || popupQueuedOrShownPaths.contains(path) || overlay != null) return
+        val isNewFileEvent = (event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0
+        if (!isNewFileEvent || !file.exists()) return
+
+        // Un solo popup per ciascun file; il ritardo resta fissato a 500 ms.
         val currentPending = pendingPopupFile
-        if (currentPending != null && filePath(currentPending) == path) return
         if (currentPending != null) return
 
+        popupQueuedOrShownPaths.add(path)
         pendingPopupFile = file
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
         val show = Runnable {
@@ -190,6 +195,8 @@ class CameraOverlayService : Service() {
         if (!file.isFile || file.length() <= 0L) return
         sourceReadyForSave = true
         pendingSaveFile = null
+        pendingSaveLastLength = -1L
+        pendingSaveStableChecks = 0
         savePhotoToArchive()
     }
 
@@ -528,6 +535,10 @@ class CameraOverlayService : Service() {
     private fun savePhotoToArchive() {
         val sourceFile = displayedFile
         if (sourceFile != null && !sourceReadyForSave) {
+            if (pendingSaveFile?.let { filePath(it) } != filePath(sourceFile)) {
+                pendingSaveLastLength = -1L
+                pendingSaveStableChecks = 0
+            }
             pendingSaveFile = sourceFile
             if (pendingSaveStartedAt == 0L) pendingSaveStartedAt = System.currentTimeMillis()
             saveButton?.text = "ATTENDI FOTO…"
@@ -578,24 +589,44 @@ class CameraOverlayService : Service() {
 
     private fun waitForCameraFileClose(file: File) {
         if (overlay == null || !saveInProgress || pendingSaveFile?.let { filePath(it) } != filePath(file)) return
-        if (completedFilePaths.contains(filePath(file)) && file.isFile && file.length() > 0L) {
+
+        // CLOSE_WRITE è il segnale principale. Come rete di sicurezza, se Android
+        // non lo consegna, accettiamo il file solo dopo 8 controlli consecutivi
+        // con dimensione invariata (circa 800 ms).
+        val length = if (file.isFile) file.length() else 0L
+        if (length > 0L) {
+            if (length == pendingSaveLastLength) pendingSaveStableChecks++
+            else pendingSaveStableChecks = 0
+            pendingSaveLastLength = length
+        } else {
+            pendingSaveLastLength = -1L
+            pendingSaveStableChecks = 0
+        }
+
+        val completed = completedFilePaths.contains(filePath(file)) ||
+            (length > 0L && pendingSaveStableChecks >= 8)
+        if (completed) {
             sourceReadyForSave = true
             pendingSaveFile = null
+            pendingSaveLastLength = -1L
+            pendingSaveStableChecks = 0
             savePhotoToArchive()
             return
         }
-        if (System.currentTimeMillis() - pendingSaveStartedAt > 10000L) {
+        if (System.currentTimeMillis() - pendingSaveStartedAt > 15000L) {
             saveInProgress = false
             pendingSaveFile = null
+            pendingSaveLastLength = -1L
+            pendingSaveStableChecks = 0
             pendingSaveStartedAt = 0L
             saveButton?.apply {
                 isEnabled = true
                 text = "SALVA IN FA"
             }
-            Toast.makeText(this, "La fotocamera non ha ancora completato la foto. Riprova SALVA.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "La foto non risulta ancora completa. Riprova SALVA.", Toast.LENGTH_LONG).show()
             return
         }
-        handler.postDelayed({ waitForCameraFileClose(file) }, 80L)
+        handler.postDelayed({ waitForCameraFileClose(file) }, 100L)
     }
 
     private fun dismissOverlay(markAsHandled: Boolean) {
@@ -623,10 +654,14 @@ class CameraOverlayService : Service() {
         saveInProgress = false
         sourceReadyForSave = false
         pendingSaveFile = null
+        pendingSaveLastLength = -1L
+        pendingSaveStableChecks = 0
         pendingSaveStartedAt = 0L
         folderLabel = null
         if (markAsHandled) displayedFile?.let { file ->
-            handledFilePaths.add(filePath(file))
+            val path = filePath(file)
+            handledFilePaths.add(path)
+            popupQueuedOrShownPaths.add(path)
         }
         displayedFile = null
         // Conserva il fix acquisito prima di aprire la fotocamera per gli scatti
