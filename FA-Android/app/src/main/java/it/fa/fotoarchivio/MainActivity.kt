@@ -177,13 +177,10 @@ class MainActivity : ComponentActivity() {
     private fun prepareArchiveFolders() {
         resetArchiveForNextVersion()
         listOf(false, true).forEach { isVideo ->
-            val root = archiveRoot(isVideo)
-            root.mkdirs()
-            migrateLegacyArchive(isVideo)
+            val root = archiveRoot(isVideo); root.mkdirs(); migrateLegacyArchive(isVideo)
             val marker = File(root, ".nomedia")
             if (!marker.exists()) marker.createNewFile()
             listOf("PERSONALE", "LAVORO", ".FA_TEMP").forEach { File(root, it).mkdirs() }
-            listOf("PERSONALE", "LAVORO").forEach { File(root, "$it/Generale").mkdirs() }
         }
     }
 
@@ -295,11 +292,16 @@ class MainActivity : ComponentActivity() {
     private fun page(title: String): LinearLayout {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(16))
-            background = android.graphics.drawable.GradientDrawable(
+            setPadding(dp(20), dp(28), dp(20), dp(16))
+            val base = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF10191F.toInt(), 0xFF182128.toInt(), 0xFF0C1217.toInt())
             )
+            val watermark = android.graphics.drawable.BitmapDrawable(resources,
+                android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_home_image)).apply { alpha = 42; gravity = Gravity.CENTER }
+            background = LayerDrawable(arrayOf(base, watermark)).apply {
+                setLayerGravity(1, Gravity.CENTER); setLayerWidth(1, dp(340)); setLayerHeight(1, dp(340))
+            }
         }
         root.addView(TextView(this).apply {
             text = title
@@ -322,19 +324,29 @@ class MainActivity : ComponentActivity() {
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(0xFF294968.toInt(), 0xFF142B43.toInt())
-            ).apply {
-                cornerRadius = dp(18).toFloat()
-                setStroke(dp(2), 0xFF9DB9D2.toInt())
-            }
-            backgroundTintList = null
-            elevation = dp(3).toFloat()
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            setOnClickListener { onClick() }
+            ).apply { cornerRadius = dp(18).toFloat(); setStroke(dp(2), 0xFF9DB9D2.toInt()) }
+            backgroundTintList = null; elevation = dp(3).toFloat()
+            setPadding(dp(8), dp(4), dp(8), dp(4)); setOnClickListener { onClick() }
+        }
+
+    private fun breadcrumbButton(label: String, active: Boolean, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label; textSize = 12f; isAllCaps = false
+            minHeight = dp(34); minimumHeight = dp(34); minWidth = 0; minimumWidth = 0
+            setTextColor(if (active) 0xFFFFFFFF.toInt() else 0xFFE5D8C8.toInt())
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                if (active) intArrayOf(0xFF786448.toInt(), 0xFF51432F.toInt())
+                else intArrayOf(0xFF39434A.toInt(), 0xFF252F36.toInt())
+            ).apply { cornerRadius = dp(10).toFloat(); setStroke(dp(1), if (active) 0xFFCDB58E.toInt() else 0xFF66727A.toInt()) }
+            backgroundTintList = null; elevation = dp(1).toFloat()
+            setPadding(dp(9), 0, dp(9), 0); setOnClickListener { onClick() }
         }
 
     private fun showHome() {
         val root = page("")
-        root.setPadding(dp(18), dp(12), dp(18), dp(48))
+        root.setPadding(dp(18), dp(30), dp(18), dp(48))
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -382,7 +394,7 @@ class MainActivity : ComponentActivity() {
             toast("Archivio attivo: LAVORO")
         }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
         root.addView(categories, LinearLayout.LayoutParams(-1, dp(58)).apply {
-            bottomMargin = dp(6)
+            bottomMargin = dp(10)
         })
 
         val captureButtons = LinearLayout(this).apply {
@@ -395,14 +407,8 @@ class MainActivity : ComponentActivity() {
             launchVideoCamera()
         }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
         root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(58)).apply {
-            bottomMargin = dp(8)
+            bottomMargin = dp(12)
         })
-
-        root.addView(ImageView(this).apply {
-            setImageResource(R.drawable.fa_home_image)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Fotocamera vintage su album fotografico"
-        }, LinearLayout.LayoutParams(-1, 0, 1f))
 
         root.addView(TextView(this).apply {
             text = "Creato da M@xm@so74 con ChatGPT"
@@ -596,8 +602,8 @@ class MainActivity : ComponentActivity() {
     private fun folders(category: String): MutableList<String> {
         // Unisce le cartelle registrate nelle preferenze con quelle realmente presenti
         // sul telefono: così una cartella fisica non scompare se manca la voce interna.
-        val saved = prefs.getStringSet(folderKey(category), setOf("Generale"))?.toMutableSet()
-            ?: mutableSetOf("Generale")
+        val saved = prefs.getStringSet(folderKey(category), emptySet())?.toMutableSet()
+            ?: mutableSetOf()
         val expanded = mutableSetOf<String>()
         saved.forEach { raw ->
             val clean = raw.trim('/').split('/').filter { it.isNotBlank() }
@@ -626,7 +632,11 @@ class MainActivity : ComponentActivity() {
                     }
             }
         }
-        if (expanded.isEmpty()) expanded.add("Generale")
+        val emptyDefaultGeneral = listOf(false, true).all { isVideo ->
+            val directory = File(archiveRoot(isVideo), "$category/Generale")
+            !directory.exists() || (directory.isDirectory && directory.listFiles().isNullOrEmpty())
+        }
+        if (emptyDefaultGeneral) expanded.remove("Generale")
         return expanded.sorted().toMutableList()
     }
 
@@ -745,10 +755,11 @@ class MainActivity : ComponentActivity() {
 
         fun refreshFolders(select: String? = null) {
             val category = categorySpinner.selectedItem?.toString() ?: activeCategory
-            val list = folders(category)
+            val rootLabel = "— Cartella principale —"
+            val list = listOf(rootLabel) + folders(category)
             folderSpinner.adapter = darkSpinnerAdapter(list)
-            val preferred = select ?: prefs.getString(lastFolderKey(category), "Generale")
-            val index = list.indexOf(preferred)
+            val preferred = select ?: prefs.getString(lastFolderKey(category), "") ?: ""
+            val index = if (preferred.isBlank()) 0 else list.indexOf(preferred)
             folderSpinner.setSelection(if (index >= 0) index else 0)
         }
 
@@ -766,7 +777,8 @@ class MainActivity : ComponentActivity() {
                 .setNegativeButton("Annulla", null)
                 .setPositiveButton("Crea") { _, _ ->
                     val category = categorySpinner.selectedItem.toString()
-                    val parent = folderSpinner.selectedItem?.toString() ?: ""
+                    val selectedParent = folderSpinner.selectedItem?.toString() ?: "— Cartella principale —"
+                    val parent = if (selectedParent == "— Cartella principale —") "" else selectedParent
                     val newName = input.text.toString().trim()
                     if (newName.isNotBlank()) refreshFolders(addFolderPath(category, parent, newName))
                 }.show()
@@ -832,15 +844,11 @@ class MainActivity : ComponentActivity() {
                 val category = categorySpinner.selectedItem.toString()
                 // Il valore dello spinner può essere un percorso completo:
                 // sanificare ogni segmento separatamente preserva le sottocartelle.
-                val folder = (folderSpinner.selectedItem?.toString() ?: "Generale")
-                    .trim('/')
-                    .split('/')
-                    .filter { it.isNotBlank() }
-                    .joinToString("/") { safeFolder(it) }
-                    .ifBlank { "Generale" }
+                val selectedFolder = folderSpinner.selectedItem?.toString() ?: "— Cartella principale —"
+                val folder = if (selectedFolder == "— Cartella principale —") "" else selectedFolder.trim('/').split('/').filter { it.isNotBlank() }.joinToString("/") { safeFolder(it) }
                 val extension = ".$sourceExtension"
                 val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(extension)) baseName else "$baseName$extension"
-                val destinationDir = File(archiveRoot(isVideo), "$category/$folder")
+                val destinationDir = File(archiveRoot(isVideo), if (folder.isBlank()) category else "$category/$folder")
                 val destination = File(destinationDir, fileName)
                 prefs.edit().putString(lastFolderKey(category), folder).apply()
                 val saved = try {
@@ -985,36 +993,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showExplorerFolder() {
-        val root = page(explorerCategory)
+        val root = page("")
         val current = explorerFolder.trim('/')
-        val titlePath = if (current.isBlank()) "Archivio " + explorerCategory
-            else "Archivio " + explorerCategory + " / " + current
-        root.addView(TextView(this).apply {
-            text = titlePath
-            textSize = 15f
-            setTextColor(0xFFF1E9DD.toInt())
-            setPadding(0, 0, 0, dp(8))
-        })
-        val crumbs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val parts = current.split('/').filter { it.isNotBlank() }
-        val crumbLabels = mutableListOf("⌂")
+        val crumbs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        crumbs.addView(breadcrumbButton(explorerCategory, parts.isEmpty()) {
+            explorerFolder = ""; selectedPhotos.clear(); selectedFolders.clear()
+            prefs.edit().putString(lastFolderKey(explorerCategory), "").apply(); showExplorerFolder()
+        }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(6) })
         var built = ""
-        parts.forEach { part ->
+        parts.forEachIndexed { index, part ->
             built = if (built.isEmpty()) part else built + "/" + part
-            crumbLabels.add(built)
-        }
-        crumbLabels.forEachIndexed { index, value ->
-            crumbs.addView(actionButton(if (index == 0) "⌂" else parts[index - 1]) {
-                explorerFolder = if (index == 0) "" else value
-                prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
-                showExplorerFolder()
-            }, LinearLayout.LayoutParams(-2, dp(40)).apply { rightMargin = dp(4) })
+            val targetPath = built
+            crumbs.addView(TextView(this).apply { text = "›"; textSize = 16f; setTextColor(0xFFB9A98F.toInt()); gravity = Gravity.CENTER; setPadding(0, 0, dp(5), 0) })
+            crumbs.addView(breadcrumbButton(part, index == parts.lastIndex) {
+                explorerFolder = targetPath; selectedPhotos.clear(); selectedFolders.clear()
+                prefs.edit().putString(lastFolderKey(explorerCategory), targetPath).apply(); showExplorerFolder()
+            }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(6) })
         }
         root.addView(HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            isFillViewport = false
-            addView(crumbs)
-        }, LinearLayout.LayoutParams(-1, dp(46)))
+            isHorizontalScrollBarEnabled = false; isFillViewport = false; addView(crumbs)
+        }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(3); bottomMargin = dp(5) })
         root.addView(actionButton("＋ NUOVA SOTTOCARTELLA") {
             createChildFolder(current)
         }, LinearLayout.LayoutParams(-1, dp(46)))
@@ -1042,29 +1041,22 @@ class MainActivity : ComponentActivity() {
             val parentFolder = relative.substringBeforeLast('/', "")
             parentFolder == exactRelative
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
-        val descendantCount = allItems.count {
-            val relative = it.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
-            if (exactRelative.isBlank()) relative.isNotBlank()
-            else relative.startsWith(exactRelative + "/")
+        val folderPrefix = if (exactRelative.isBlank()) "" else exactRelative + "/"
+        val totalFiles = allItems.count { item ->
+            val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
+            if (exactRelative.isBlank()) relative.isNotBlank() else relative == exactRelative || relative.startsWith(folderPrefix)
+        }
+        val totalSubfolders = folders(explorerCategory).count { path ->
+            path != exactRelative && (exactRelative.isBlank() || path.startsWith(folderPrefix))
         }
         root.addView(TextView(this).apply {
-            text = children.size.toString() + " cartelle  •  " + photos.count { !it.isVideo } +
-                " foto  •  " + photos.count { it.isVideo } + " video" +
-                (if (descendantCount > 0) "  •  " + descendantCount + " elementi nelle sottocartelle" else "")
-            textSize = 12f
-            setTextColor(0xFFC7B9A7.toInt())
-            setPadding(0, dp(6), 0, dp(6))
+            text = totalFiles.toString() + " file totali (incluse sottocartelle)  •  " + totalSubfolders + " sottocartelle"
+            textSize = 12f; setTextColor(0xFFC7B9A7.toInt()); setPadding(0, dp(5), 0, dp(7))
         })
-        if (selectedFolders.isNotEmpty()) {
-            root.addView(actionButton("GESTISCI CARTELLE SELEZIONATE (${selectedFolders.size})") {
-                showBulkFolderActions()
-            }, LinearLayout.LayoutParams(-1, dp(44)))
-        }
-        if (selectedPhotos.isNotEmpty()) {
-            root.addView(actionButton("GESTISCI FOTO/VIDEO SELEZIONATI (${selectedPhotos.size})") {
-                showBulkPhotoActions()
-            }, LinearLayout.LayoutParams(-1, dp(44)))
-        }
+        val selectedCount = selectedFolders.size + selectedPhotos.size
+        if (selectedCount > 0) root.addView(actionButton("ELEMENTI SELEZIONATI (" + selectedCount + ")") {
+            showSelectedItemsActions()
+        }, LinearLayout.LayoutParams(-1, dp(44)))
         val scroll = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         children.forEach { child ->
@@ -1086,7 +1078,6 @@ class MainActivity : ComponentActivity() {
                     showExplorerFolder()
                 }
             }
-            row.addView(folderCheck)
             row.addView(TextView(this).apply {
                 text = "📁"
                 textSize = 27f
@@ -1104,9 +1095,12 @@ class MainActivity : ComponentActivity() {
                 setTextColor(0xFFC7B9A7.toInt())
             })
             row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(folderCheck)
             row.isClickable = true
             row.isFocusable = true
             row.setOnClickListener {
+                selectedPhotos.clear()
+                selectedFolders.clear()
                 explorerFolder = fullPath
                 prefs.edit().putString(lastFolderKey(explorerCategory), fullPath).apply()
                 showExplorerFolder()
@@ -1177,11 +1171,7 @@ class MainActivity : ComponentActivity() {
         })
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(ImageView(this).apply {
-            setImageResource(R.drawable.fa_home_image)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Fotocamera vintage su album fotografico"
-        }, LinearLayout.LayoutParams(-1, 0, 0.45f))
+        // Immagine vintage usata come watermark trasparente sullo sfondo della pagina.
         root.addView(TextView(this).apply {
             text = "Creato da M@xm@so74 con Chatgpt"
             textSize = 11f
@@ -1193,10 +1183,151 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, dp(42))
         }
-        bottom.addView(actionButton("CARTELLE") { showFolderList(explorerCategory) },
+        bottom.addView(actionButton("HOME") { showHome() },
             LinearLayout.LayoutParams(-1, dp(50)))
         root.addView(bottom)
         setContentView(root)
+    }
+
+    private fun showSelectedItemsActions() {
+        val count = selectedFolders.size + selectedPhotos.size
+        if (count == 0) return
+        val options = arrayOf("Seleziona tutti gli elementi di questa cartella", "Sposta selezione", "Esporta selezione in ZIP", "Elimina selezione", "Deseleziona tutto")
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("ELEMENTI SELEZIONATI (" + count + ")")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        folderChildren(explorerCategory, explorerFolder).forEach { child ->
+                            selectedFolders.add(if (explorerFolder.isBlank()) child else explorerFolder.trimEnd('/') + "/" + child)
+                        }
+                        listPhotos().filter { photo ->
+                            if (!isInCategory(photo.path, explorerCategory)) false
+                            else photo.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").substringBeforeLast("/", "") == explorerFolder.trim('/')
+                        }.forEach { selectedPhotos.add(it.uri.toString()) }
+                        showExplorerFolder()
+                    }
+                    1 -> moveSelectedItems()
+                    2 -> { val chosen = selectedMediaForActions(); if (chosen.isEmpty()) toast("La selezione non contiene foto o video") else exportZip(chosen, "FA-Selezione") }
+                    3 -> confirmDeleteSelectedItems()
+                    4 -> { selectedFolders.clear(); selectedPhotos.clear(); showExplorerFolder() }
+                }
+            }.show()
+    }
+
+    private fun selectedMediaForActions(): List<PhotoItem> {
+        val selectedPaths = selectedFolders.toList()
+        return listPhotos().filter { item ->
+            if (selectedPhotos.contains(item.uri.toString())) true
+            else if (!isInCategory(item.path, explorerCategory)) false
+            else {
+                val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+                selectedPaths.any { relative == it || relative.startsWith(it + "/") }
+            }
+        }.distinctBy { it.file.absolutePath }
+    }
+
+    private fun confirmDeleteSelectedItems() {
+        val foldersToDelete = selectedFolders.toList().filterNot { path ->
+            selectedFolders.any { other -> other != path && path.startsWith(other + "/") }
+        }
+        val photosToDelete = selectedMediaForActions().filter { photo ->
+            val relative = photo.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+            !foldersToDelete.any { relative == it || relative.startsWith(it + "/") }
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Confermi eliminazione?")
+            .setMessage("Saranno eliminati gli elementi selezionati solo dall'archivio FA. Gli originali in DCIM/Camera restano intatti.")
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Elimina") { _, _ ->
+                var deleted = 0
+                photosToDelete.forEach { if (deleteFaItem(it)) deleted++ }
+                foldersToDelete.forEach { path ->
+                    listOf(false, true).forEach { isVideo ->
+                        val archive = File(archiveRoot(isVideo), explorerCategory).canonicalFile
+                        val folder = File(archive, path).canonicalFile
+                        if (folder.path.startsWith(archive.path + File.separator) && folder.exists() && folder.deleteRecursively()) deleted++
+                    }
+                    saveFolderList(explorerCategory, folders(explorerCategory).filterNot { it == path || it.startsWith(path + "/") })
+                }
+                selectedFolders.clear(); selectedPhotos.clear()
+                toast(deleted.toString() + " elementi eliminati")
+                showExplorerFolder()
+            }.show()
+    }
+
+    private fun moveSelectedItems() {
+        val folderRoots = selectedFolders.toList().filterNot { path ->
+            selectedFolders.any { other -> other != path && path.startsWith(other + "/") }
+        }
+        val media = selectedMediaForActions()
+        val photosToMove = media.filter { photo ->
+            val relative = photo.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+            !folderRoots.any { relative == it || relative.startsWith(it + "/") }
+        }
+        val targets = mutableListOf<Pair<String, String>>()
+        listOf("PERSONALE", "LAVORO").forEach { category ->
+            targets.add(category to "")
+            folders(category).forEach { targets.add(category to it) }
+        }
+        val labels = targets.map { it.first + " / " + if (it.second.isBlank()) "Cartella principale" else it.second }.toTypedArray()
+        val last = prefs.getString("fa_last_move_destination", "") ?: ""
+        val initial = targets.indexOfFirst { it.first + "/" + it.second == last }.coerceAtLeast(0)
+        var chosen = initial
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Sposta selezione")
+            .setSingleChoiceItems(labels, initial) { _, which -> chosen = which }
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Sposta") { _, _ ->
+                val category = targets[chosen].first
+                val destinationFolder = targets[chosen].second
+                val sourceCategory = explorerCategory
+                val movedDirs = mutableListOf<Pair<File, File>>()
+                val movedFiles = mutableListOf<Pair<File, File>>()
+                var ok = true
+                for (oldPath in folderRoots) {
+                    val newPath = if (destinationFolder.isBlank()) oldPath.substringAfterLast('/') else destinationFolder + "/" + oldPath.substringAfterLast('/')
+                    if (category == sourceCategory && (newPath == oldPath || newPath.startsWith(oldPath + "/") || oldPath.startsWith(newPath + "/"))) { ok = false; break }
+                    for (isVideo in listOf(false, true)) {
+                        val oldDir = File(archiveRoot(isVideo), "$sourceCategory/$oldPath")
+                        if (!oldDir.exists()) continue
+                        val newDir = File(archiveRoot(isVideo), "$category/$newPath")
+                        if (newDir.exists()) { ok = false; break }
+                        newDir.parentFile?.mkdirs()
+                        if (!oldDir.renameTo(newDir)) { ok = false; break }
+                        movedDirs.add(newDir to oldDir)
+                    }
+                    if (!ok) break
+                }
+                if (ok) for (photo in photosToMove) {
+                    val dir = File(archiveRoot(photo.isVideo), if (destinationFolder.isBlank()) category else "$category/$destinationFolder")
+                    val target = File(dir, photo.file.name)
+                    if (target.exists()) { ok = false; break }
+                    dir.mkdirs()
+                    if (!photo.file.renameTo(target)) { ok = false; break }
+                    movedFiles.add(target to photo.file)
+                }
+                if (!ok) {
+                    movedFiles.asReversed().forEach { (to, from) -> to.renameTo(from) }
+                    movedDirs.asReversed().forEach { (to, from) -> from.parentFile?.mkdirs(); to.renameTo(from) }
+                    toast("Spostamento non riuscito: archivio ripristinato dove possibile")
+                } else {
+                    val sourceList = folders(sourceCategory).toMutableSet()
+                    val targetList = folders(category).toMutableSet()
+                    folderRoots.forEach { oldPath ->
+                        val newPath = if (destinationFolder.isBlank()) oldPath.substringAfterLast('/') else destinationFolder + "/" + oldPath.substringAfterLast('/')
+                        sourceList.filter { it == oldPath || it.startsWith(oldPath + "/") }.forEach { old ->
+                            sourceList.remove(old); targetList.add(newPath + old.removePrefix(oldPath))
+                        }
+                    }
+                    saveFolderList(sourceCategory, sourceList.toList()); saveFolderList(category, targetList.toList())
+                    prefs.edit().putString("fa_last_move_destination", category + "/" + destinationFolder).apply()
+                    selectedFolders.clear(); selectedPhotos.clear()
+                    explorerCategory = category; explorerFolder = destinationFolder
+                    prefs.edit().putString(lastFolderKey(category), destinationFolder).apply()
+                    toast("Spostamento completato"); showExplorerFolder()
+                }
+            }.show()
     }
 
     private fun folderActions(path: String) {
