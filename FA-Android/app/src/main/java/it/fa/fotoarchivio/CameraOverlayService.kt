@@ -70,6 +70,14 @@ class CameraOverlayService : Service() {
     private val completedFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
     private var mediaStoreObserver: ContentObserver? = null
+    // Controllo periodico di sicurezza: alcune versioni della fotocamera Motorola
+    // non notificano sempre FileObserver/MediaStore al termine della registrazione.
+    private val cameraScanRunnable = object : Runnable {
+        override fun run() {
+            scanRecentCameraMedia()
+            handler.postDelayed(this, 1000L)
+        }
+    }
     private var pendingPopupFile: File? = null
     private var pendingPopupWasMoved = false
     private var pendingPopupRunnable: Runnable? = null
@@ -183,6 +191,11 @@ class CameraOverlayService : Service() {
         } catch (_: Exception) {
             cameraDirectoryObserver = null
         }
+
+        // Non ci affidiamo più soltanto agli eventi: ricontrolliamo MediaStore
+        // ogni secondo per recuperare i video salvati ma non notificati.
+        handler.removeCallbacks(cameraScanRunnable)
+        handler.postDelayed(cameraScanRunnable, 1000L)
     }
 
     private fun scanRecentCameraMedia() {
@@ -1034,6 +1047,7 @@ class CameraOverlayService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Chiudendo FA dal selettore delle app recenti, rimuove il popup
         // e arresta il servizio che lo mantiene visibile.
+        handler.removeCallbacks(cameraScanRunnable)
         pendingPopupRunnable?.let { handler.removeCallbacks(it) }
         pendingPopupRunnable = null
         pendingPopupFile = null
@@ -1050,6 +1064,7 @@ class CameraOverlayService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(cameraScanRunnable)
         cancelReadinessCheck()
         cameraDirectoryObserver?.stopWatching()
         cameraDirectoryObserver = null
