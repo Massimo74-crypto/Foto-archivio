@@ -251,6 +251,10 @@ class CameraOverlayService : Service() {
                             if (stillPending || duration <= 0L) continue
                             publishedVideoPaths.add(key)
                             completedFilePaths.add(key)
+                            // MediaStore conferma che questo è un video definitivo:
+                            // non deve essere bloccato dal flag relativo alla rinomina
+                            // tardiva del video precedente.
+                            handledVideoAwaitingFinalRename = false
                             handleCameraFileEvent(file, FileObserver.MOVED_TO)
                         } else {
                             if (popupQueuedOrShownPaths.contains(key)) continue
