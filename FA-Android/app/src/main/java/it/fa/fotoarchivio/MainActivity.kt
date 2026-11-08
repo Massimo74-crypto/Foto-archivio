@@ -320,7 +320,7 @@ class MainActivity : ComponentActivity() {
                 (watermarkWidth * watermarkBitmap.height.toFloat() / watermarkBitmap.width).toInt()
             else watermarkWidth
             val watermark = android.graphics.drawable.BitmapDrawable(resources, watermarkBitmap).apply {
-                alpha = 42
+                alpha = 92
                 // FILL rispetta i 250dp assegnati al layer: CENTER userebbe
                 // le dimensioni intrinseche e ritaglierebbe i bordi del PNG.
                 gravity = Gravity.FILL
@@ -329,7 +329,7 @@ class MainActivity : ComponentActivity() {
             // né sostituisce il PNG fotografico originale.
             val movieCameraBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_vintage_movie_camera)
             val movieCamera = android.graphics.drawable.BitmapDrawable(resources, movieCameraBitmap).apply {
-                alpha = 130
+                alpha = 210
                 gravity = Gravity.FILL
             }
             background = LayerDrawable(arrayOf(base, watermark, movieCamera)).apply {
@@ -339,9 +339,9 @@ class MainActivity : ComponentActivity() {
                 // Offset rispetto al centro del drawable: la cinepresa resta
                 // agganciata all'angolo alto-sinistro del PNG centrato.
                 setLayerGravity(2, Gravity.CENTER)
-                setLayerWidth(2, dp(32))
-                setLayerHeight(2, dp(33))
-                setLayerInset(2, -dp(194), -dp(117), 0, 0)
+                setLayerWidth(2, dp(58))
+                setLayerHeight(2, dp(60))
+                setLayerInset(2, -dp(178), -dp(105), 0, 0)
             }
         }
         root.addView(TextView(this).apply {
@@ -1136,6 +1136,7 @@ class MainActivity : ComponentActivity() {
         children.forEach { child ->
             val fullPath = if (current.isBlank()) child else current + "/" + child
             val count = descendantCounts[fullPath] ?: 0
+            val subfolderCount = folderPaths.count { it.startsWith(fullPath + "/") }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -1164,7 +1165,7 @@ class MainActivity : ComponentActivity() {
                 setTextColor(0xFFF1E9DD.toInt())
             })
             labels.addView(TextView(this).apply {
-                text = count.toString() + " elementi"
+                text = count.toString() + " elementi  •  " + subfolderCount + " sottocartelle"
                 textSize = 12f
                 setTextColor(0xFFC7B9A7.toInt())
             })
