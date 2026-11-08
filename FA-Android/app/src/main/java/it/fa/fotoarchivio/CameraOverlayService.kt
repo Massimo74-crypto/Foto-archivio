@@ -449,6 +449,7 @@ class CameraOverlayService : Service() {
             if (isVideo(file) && publishedVideoPaths.contains(path) && path != existingPath) {
                 pendingPopupRunnable?.let { handler.removeCallbacks(it) }
                 popupQueuedOrShownPaths.remove(existingPath)
+                popupQueuedOrShownPaths.add(path)
                 pendingPopupFile = file
                 pendingPopupWasMoved = false
                 pendingPopupMissingSinceMillis = 0L
