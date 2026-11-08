@@ -240,7 +240,7 @@ class CameraOverlayService : Service() {
                         val file = File(path)
                         if (!file.isFile || file.length() <= 0L || !isCameraMedia(file)) continue
                         val key = filePath(file)
-                        if (handledFilePaths.contains(key) || popupQueuedOrShownPaths.contains(key)) continue
+                        if (handledFilePaths.contains(key)) continue
                         if (isVideo(file)) {
                             // Un video viene recuperato da MediaStore soltanto quando
                             // Android lo ha pubblicato (IS_PENDING=0) e ne legge la durata.
@@ -253,6 +253,7 @@ class CameraOverlayService : Service() {
                             completedFilePaths.add(key)
                             handleCameraFileEvent(file, FileObserver.MOVED_TO)
                         } else {
+                            if (popupQueuedOrShownPaths.contains(key)) continue
                             handleCameraFileEvent(file, FileObserver.CREATE)
                         }
                         if (pendingPopupFile != null || overlay != null) return
