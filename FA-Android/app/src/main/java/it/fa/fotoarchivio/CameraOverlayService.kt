@@ -89,6 +89,7 @@ class CameraOverlayService : Service() {
     private var pendingVideoLastLength = -1L
     private var pendingVideoLastModified = -1L
     private var pendingVideoStableChecks = 0
+    private var pendingVideoWaitStartedAt = 0L
     private var handledVideoAwaitingFinalRename = false
     private var displayedFileWasMoved = false
     private var sourceReadyForSave = false
@@ -336,7 +337,10 @@ class CameraOverlayService : Service() {
         val files = cameraDir.listFiles() ?: return
         val sessionStartMillis = (sessionStartSeconds - 10L).coerceAtLeast(0L) * 1000L
         files.asSequence()
-            .filter { it.isFile && it.lastModified() >= sessionStartMillis && isCameraMedia(it) }
+            // I video sono gestiti da FileObserver e MediaStore: non crearne
+            // candidati solo dal semplice elenco file, perché potrebbero essere
+            // ancora in registrazione e restare in attesa senza evento finale.
+            .filter { it.isFile && it.lastModified() >= sessionStartMillis && isCameraMedia(it) && !isVideo(it) }
             .sortedByDescending { it.lastModified() }
             .take(30)
             .forEach { file ->
@@ -504,6 +508,7 @@ class CameraOverlayService : Service() {
         pendingVideoLastLength = -1L
         pendingVideoLastModified = -1L
         pendingVideoStableChecks = 0
+        pendingVideoWaitStartedAt = 0L
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
         val show = Runnable {
             // Dopo l'attesa iniziale di 500 ms verifichiamo che il video
@@ -513,9 +518,25 @@ class CameraOverlayService : Service() {
             val currentPath = filePath(currentFile)
             if (isVideo(currentFile)) {
                 if (!publishedVideoPaths.contains(currentPath)) {
+                    // Non lasciare un video senza evento di completamento in attesa
+                    // per sempre: altrimenti blocca tutti i video successivi.
+                    if (pendingVideoWaitStartedAt == 0L) pendingVideoWaitStartedAt = System.currentTimeMillis()
+                    if (System.currentTimeMillis() - pendingVideoWaitStartedAt >= 15000L) {
+                        popupQueuedOrShownPaths.remove(currentPath)
+                        pendingPopupFile = null
+                        pendingPopupWasMoved = false
+                        pendingPopupMissingSinceMillis = 0L
+                        pendingPopupRunnable = null
+                        pendingVideoLastLength = -1L
+                        pendingVideoLastModified = -1L
+                        pendingVideoStableChecks = 0
+                        pendingVideoWaitStartedAt = 0L
+                        return@Runnable
+                    }
                     pendingPopupRunnable?.let { handler.postDelayed(it, 500L) }
                     return@Runnable
                 }
+                pendingVideoWaitStartedAt = 0L
                 val length = currentFile.length()
                 val modified = currentFile.lastModified()
                 if (length > 0L && length == pendingVideoLastLength && modified == pendingVideoLastModified) {
@@ -541,6 +562,7 @@ class CameraOverlayService : Service() {
             pendingVideoLastLength = -1L
             pendingVideoLastModified = -1L
             pendingVideoStableChecks = 0
+            pendingVideoWaitStartedAt = 0L
             if (overlay != null || handledFilePaths.contains(currentPath) || !currentFile.exists()) return@Runnable
             sourceReadyForSave = completedFilePaths.contains(currentPath) && currentFile.length() > 0L
             photoDateTakenMillis = currentFile.lastModified().takeIf { it > 0L }
@@ -1174,6 +1196,7 @@ class CameraOverlayService : Service() {
             pendingVideoLastLength = -1L
             pendingVideoLastModified = -1L
             pendingVideoStableChecks = 0
+            pendingVideoWaitStartedAt = 0L
         }
         val panel = overlay
         // Azzera prima lo stato: nessun controllo successivo deve considerare
