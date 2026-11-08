@@ -74,6 +74,7 @@ class CameraOverlayService : Service() {
     private var displayedFileWasMoved = false
     private var sourceReadyForSave = false
     private var archiveCopyInProgress = false
+    private var suppressCameraPopupsUntil = 0L
     private var saveOperationId = 0L
     private var pendingSaveStartedAt = 0L
     private var pendingSaveFile: File? = null
@@ -227,6 +228,13 @@ class CameraOverlayService : Service() {
 
         // CLOSE_WRITE conferma il completamento, ma non genera un secondo popup.
         if (handledFilePaths.contains(path) || popupQueuedOrShownPaths.contains(path) || overlay != null) return
+        // Dopo il salvataggio la fotocamera può consegnare in ritardo un evento
+        // CREATE/MOVED_TO relativo allo stesso scatto. Non riaprire il popup vuoto.
+        if (System.currentTimeMillis() < suppressCameraPopupsUntil) {
+            handledFilePaths.add(path)
+            popupQueuedOrShownPaths.add(path)
+            return
+        }
         val isNewFileEvent = (event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0
         if (!isNewFileEvent || !file.exists()) return
         if (pendingPopupFile != null) return
@@ -853,6 +861,19 @@ class CameraOverlayService : Service() {
 
     private fun dismissOverlay(markAsHandled: Boolean) {
         cancelReadinessCheck()
+        if (markAsHandled) {
+            suppressCameraPopupsUntil = System.currentTimeMillis() + 900L
+            pendingPopupRunnable?.let { handler.removeCallbacks(it) }
+            pendingPopupRunnable = null
+            pendingPopupFile?.let { pending ->
+                val pendingPath = filePath(pending)
+                handledFilePaths.add(pendingPath)
+                popupQueuedOrShownPaths.add(pendingPath)
+                handledPathsAwaitingRename.add(pendingPath)
+            }
+            pendingPopupFile = null
+            pendingPopupWasMoved = false
+        }
         val panel = overlay
         // Azzera prima lo stato: nessun controllo successivo deve considerare
         // ancora aperta la finestra appena salvata.
