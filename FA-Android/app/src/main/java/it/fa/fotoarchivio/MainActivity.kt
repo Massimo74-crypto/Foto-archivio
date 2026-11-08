@@ -1,6 +1,8 @@
 package it.fa.fotoarchivio
 
+import android.Manifest
 import android.app.AlertDialog
+import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.LayerDrawable
 import android.content.ContentValues
@@ -14,6 +16,11 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.Handler
+import android.os.Looper
+import android.location.Location
+import android.location.LocationManager
 import android.provider.MediaStore
 import android.view.View
 import android.view.Gravity
@@ -37,6 +44,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// GPS metadata test build 0.4.3; stable 0.4.1 branch remains untouched.
 class MainActivity : ComponentActivity() {
     private var activeCategory = "PERSONALE"
     private var pendingPhoto: Uri? = null
@@ -46,10 +54,18 @@ class MainActivity : ComponentActivity() {
     private var waitingForStoragePermission = false
     private var importQueue: MutableList<Uri> = mutableListOf()
     private val selectedPhotos = linkedSetOf<String>()
+    private val selectedFolders = linkedSetOf<String>()
+    private var cachedPhotoItems: List<PhotoItem>? = null
+    private var cachedPhotoItemsAt = 0L
+    private val cachedFolderLists = mutableMapOf<String, Pair<Long, List<String>>>()
     private var explorerCategory = "PERSONALE"
     private var explorerFolder = "Generale"
     private var sortMode = "Data"
     private val prefs by lazy { getSharedPreferences("fa_settings", Context.MODE_PRIVATE) }
+    private val gpsHandler = Handler(Looper.getMainLooper())
+    private var gpsCancellation: CancellationSignal? = null
+    private var bestCameraLocation: Location? = null
+    private var gpsLaunchFinished = false
 
     private val cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val uri = pendingPhoto
@@ -73,6 +89,14 @@ class MainActivity : ComponentActivity() {
             toast("Registrazione annullata")
             showHome()
         }
+    }
+
+    private val locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (!granted) toast("Posizione non autorizzata: FA salverà comunque la foto, ma senza nuove coordinate GPS")
+        // Non attendere il fix GPS: avvia subito la fotocamera.
+        startNativeCameraSession()
     }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -127,18 +151,119 @@ class MainActivity : ComponentActivity() {
 
     private fun archiveRoot(isVideo: Boolean): File {
         val top = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-        return File(Environment.getExternalStorageDirectory(), "$top/FA archivio principale")
+        return File(Environment.getExternalStorageDirectory(), "$top/FotoArchivio")
+    }
+
+    // Pulizia iniziale richiesta per la nuova versione: riguarda solo le cartelle
+    // archivio create da FA. DCIM/Camera e la Galleria Motorola non vengono toccate.
+    private fun resetArchiveForNextVersion() {
+        val storage = Environment.getExternalStorageDirectory()
+        val photoRoot = File(storage, "Pictures/FotoArchivio")
+        val marker = File(photoRoot, ".fa_archivio_azzerato_v2")
+        if (marker.exists()) return
+        val faOwnedRoots = listOf(
+            photoRoot,
+            File(storage, "Movies/FotoArchivio"),
+            File(storage, "Pictures/FA archivio principale"),
+            File(storage, "Pictures/FA"),
+            File(storage, "Movies/FA archivio principale"),
+            File(storage, "Movies/FA")
+        )
+        faOwnedRoots.forEach { directory ->
+            try { if (directory.exists()) directory.deleteRecursively() } catch (_: Exception) { }
+        }
+        photoRoot.mkdirs()
+        File(storage, "Movies/FotoArchivio").mkdirs()
+        // Il reset riguarda anche le sottocartelle ricordate dall'app:
+        // PERSONALE e LAVORO ripartono entrambe dalla cartella principale.
+        getSharedPreferences("fa_settings", Context.MODE_PRIVATE).edit()
+            .remove("folders_PERSONALE")
+            .remove("folders_LAVORO")
+            .remove("last_folder_PERSONALE")
+            .remove("last_folder_LAVORO")
+            .remove("fa_last_move_destination")
+            .putString("active_category", "PERSONALE")
+            .apply()
+        activeCategory = "PERSONALE"
+        try { marker.createNewFile() } catch (_: Exception) { }
     }
 
     private fun prepareArchiveFolders() {
+        resetArchiveForNextVersion()
         listOf(false, true).forEach { isVideo ->
             val root = archiveRoot(isVideo)
             root.mkdirs()
             val marker = File(root, ".nomedia")
             if (!marker.exists()) marker.createNewFile()
             listOf("PERSONALE", "LAVORO", ".FA_TEMP").forEach { File(root, it).mkdirs() }
-            listOf("PERSONALE", "LAVORO").forEach { File(root, "$it/Generale").mkdirs() }
         }
+    }
+
+    /**
+     * Unifica i vecchi archivi nella cartella pubblica FotoArchivio.
+     * Ogni file viene copiato e verificato prima di rimuovere la sorgente.
+     * In caso di omonimia non sovrascrive: crea un nome "recuperato".
+     */
+    private fun migrateLegacyArchive(isVideo: Boolean) {
+        val top = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+        val storage = Environment.getExternalStorageDirectory()
+        val legacyNames = mutableListOf("FA archivio principale")
+        val shortLegacy = File(storage, "$top/FA")
+        if (shortLegacy.isDirectory) legacyNames.add("FA")
+        legacyNames.forEach { legacyName ->
+            val legacy = File(storage, "$top/$legacyName")
+            if (!legacy.isDirectory || legacy.canonicalFile == archiveRoot(isVideo).canonicalFile) return@forEach
+            mergeLegacyNode(legacy, archiveRoot(isVideo))
+            removeEmptyLegacyDirectories(legacy)
+        }
+    }
+
+    private fun mergeLegacyNode(source: File, destination: File) {
+        try {
+            var target = destination
+            if (source.isDirectory) {
+                if (target.exists() && !target.isDirectory) {
+                    target = uniqueLegacyTarget(target.parentFile ?: return, target.name)
+                }
+                if (!target.exists() && !target.mkdirs()) return
+                source.listFiles()?.forEach { child ->
+                    var childTarget = File(target, child.name)
+                    if (child.isFile && childTarget.exists()) childTarget = uniqueLegacyTarget(target, child.name)
+                    mergeLegacyNode(child, childTarget)
+                }
+                if (source.listFiles()?.isEmpty() == true) source.delete()
+            } else {
+                if (target.exists()) target = uniqueLegacyTarget(target.parentFile ?: return, target.name)
+                target.parentFile?.mkdirs()
+                source.inputStream().use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (target.exists() && target.length() == source.length()) source.delete()
+                else target.delete()
+            }
+        } catch (_: Exception) {
+            // Se il trasferimento non riesce, la sorgente resta intatta.
+        }
+    }
+
+    private fun uniqueLegacyTarget(parent: File, originalName: String): File {
+        val dot = originalName.lastIndexOf('.')
+        val stem = if (dot > 0) originalName.substring(0, dot) else originalName
+        val ext = if (dot > 0) originalName.substring(dot) else ""
+        var index = 1
+        var candidate = File(parent, "$stem (recuperato $index)$ext")
+        while (candidate.exists()) {
+            index++
+            candidate = File(parent, "$stem (recuperato $index)$ext")
+        }
+        return candidate
+    }
+
+    private fun removeEmptyLegacyDirectories(directory: File) {
+        try {
+            directory.listFiles()?.filter { it.isDirectory }?.forEach { removeEmptyLegacyDirectories(it) }
+            if (directory.isDirectory && directory.listFiles()?.isEmpty() == true) directory.delete()
+        } catch (_: Exception) { }
     }
 
     private fun archiveFileUri(file: File): Uri =
@@ -182,11 +307,42 @@ class MainActivity : ComponentActivity() {
     private fun page(title: String): LinearLayout {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(16))
-            background = android.graphics.drawable.GradientDrawable(
+            setPadding(dp(20), dp(28), dp(20), dp(16))
+            val base = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF10191F.toInt(), 0xFF182128.toInt(), 0xFF0C1217.toInt())
             )
+            val watermarkBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_home_image)
+            // Il PNG originale resta invariato; viene solo mostrato più piccolo
+            // per mantenere margine laterale su tutti gli schermi.
+            val watermarkWidth = dp(250)
+            val watermarkHeight = if (watermarkBitmap.width > 0)
+                (watermarkWidth * watermarkBitmap.height.toFloat() / watermarkBitmap.width).toInt()
+            else watermarkWidth
+            val watermark = android.graphics.drawable.BitmapDrawable(resources, watermarkBitmap).apply {
+                alpha = 92
+                // FILL rispetta i 250dp assegnati al layer: CENTER userebbe
+                // le dimensioni intrinseche e ritaglierebbe i bordi del PNG.
+                gravity = Gravity.FILL
+            }
+            // Cinepresa vintage separata in WebP trasparente: non ricostruisce
+            // né sostituisce il PNG fotografico originale.
+            val movieCameraBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_vintage_movie_camera)
+            val movieCamera = android.graphics.drawable.BitmapDrawable(resources, movieCameraBitmap).apply {
+                alpha = 210
+                gravity = Gravity.FILL
+            }
+            background = LayerDrawable(arrayOf(base, watermark, movieCamera)).apply {
+                setLayerGravity(1, Gravity.CENTER)
+                setLayerWidth(1, watermarkWidth)
+                setLayerHeight(1, watermarkHeight)
+                // Offset rispetto al centro del drawable: la cinepresa resta
+                // agganciata all'angolo alto-sinistro del PNG centrato.
+                setLayerGravity(2, Gravity.CENTER)
+                setLayerWidth(2, dp(58))
+                setLayerHeight(2, dp(60))
+                setLayerInset(2, -dp(178), -dp(105), 0, 0)
+            }
         }
         root.addView(TextView(this).apply {
             text = title
@@ -209,19 +365,29 @@ class MainActivity : ComponentActivity() {
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(0xFF294968.toInt(), 0xFF142B43.toInt())
-            ).apply {
-                cornerRadius = dp(18).toFloat()
-                setStroke(dp(2), 0xFF9DB9D2.toInt())
-            }
-            backgroundTintList = null
-            elevation = dp(3).toFloat()
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            setOnClickListener { onClick() }
+            ).apply { cornerRadius = dp(18).toFloat(); setStroke(dp(2), 0xFF9DB9D2.toInt()) }
+            backgroundTintList = null; elevation = dp(3).toFloat()
+            setPadding(dp(8), dp(4), dp(8), dp(4)); setOnClickListener { onClick() }
+        }
+
+    private fun breadcrumbButton(label: String, active: Boolean, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label; textSize = 12f; isAllCaps = false
+            minHeight = dp(34); minimumHeight = dp(34); minWidth = 0; minimumWidth = 0
+            setTextColor(if (active) 0xFFFFFFFF.toInt() else 0xFFE5D8C8.toInt())
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                if (active) intArrayOf(0xFF786448.toInt(), 0xFF51432F.toInt())
+                else intArrayOf(0xFF39434A.toInt(), 0xFF252F36.toInt())
+            ).apply { cornerRadius = dp(10).toFloat(); setStroke(dp(1), if (active) 0xFFCDB58E.toInt() else 0xFF66727A.toInt()) }
+            backgroundTintList = null; elevation = dp(1).toFloat()
+            setPadding(dp(9), 0, dp(9), 0); setOnClickListener { onClick() }
         }
 
     private fun showHome() {
         val root = page("")
-        root.setPadding(dp(18), dp(12), dp(18), dp(48))
+        root.setPadding(dp(18), dp(30), dp(18), dp(48))
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -269,7 +435,7 @@ class MainActivity : ComponentActivity() {
             toast("Archivio attivo: LAVORO")
         }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
         root.addView(categories, LinearLayout.LayoutParams(-1, dp(58)).apply {
-            bottomMargin = dp(6)
+            bottomMargin = dp(10)
         })
 
         val captureButtons = LinearLayout(this).apply {
@@ -282,15 +448,10 @@ class MainActivity : ComponentActivity() {
             launchVideoCamera()
         }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
         root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(58)).apply {
-            bottomMargin = dp(8)
+            bottomMargin = dp(12)
         })
 
-        root.addView(ImageView(this).apply {
-            setImageResource(R.drawable.fa_home_image)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Fotocamera vintage su album fotografico"
-        }, LinearLayout.LayoutParams(-1, 0, 1f))
-
+        root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(TextView(this).apply {
             text = "Creato da M@xm@so74 con ChatGPT"
             textSize = 16f
@@ -314,20 +475,148 @@ class MainActivity : ComponentActivity() {
         setContentView(root)
     }
 
+    private var waitingForOverlayPermission = false
+    private var cameraSessionLaunched = false
+
+    override fun onResume() {
+        super.onResume()
+        if (waitingForOverlayPermission) {
+            waitingForOverlayPermission = false
+            if (Settings.canDrawOverlays(this)) startCameraWithLocationPermission()
+            else toast("Senza questa autorizzazione FA non può mostrare il nome sopra la fotocamera")
+        } else if (cameraSessionLaunched) {
+            cameraSessionLaunched = false
+            stopService(Intent(this, CameraOverlayService::class.java))
+        }
+    }
+
     private fun launchCamera() {
+        if (!Settings.canDrawOverlays(this)) {
+            waitingForOverlayPermission = true
+            try {
+                startActivity(Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                ))
+            } catch (e: Exception) {
+                waitingForOverlayPermission = false
+                toast("Impossibile aprire l'autorizzazione per la sovrapposizione")
+            }
+            return
+        }
+        startCameraWithLocationPermission()
+    }
+
+    private fun startCameraWithLocationPermission() {
+        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) {
+            // La fotocamera parte subito: il servizio aggiorna il GPS in parallelo.
+            startNativeCameraSession()
+        } else {
+            locationPermissionLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        }
+    }
+
+    /**
+     * Acquisisce un fix mentre MainActivity è ancora visibile.
+     * La fotocamera Motorola viene avviata comunque dopo il primo fix utile
+     * oppure dopo un timeout breve: il GPS non blocca mai lo scatto.
+     */
+    private fun acquireLocationThenStartCamera() {
+        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) {
+            startNativeCameraSession()
+            return
+        }
+        val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val providers = try {
+            manager.getProviders(true).filter {
+                it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER
+            }
+        } catch (_: Exception) { emptyList() }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || providers.isEmpty()) {
+            startNativeCameraSession()
+            return
+        }
+        gpsCancellation?.cancel()
+        gpsCancellation = CancellationSignal()
+        bestCameraLocation = null
+        gpsLaunchFinished = false
+        val timeout = Runnable { finishLocationAcquisition() }
+        gpsHandler.removeCallbacksAndMessages(null)
+        gpsHandler.postDelayed(timeout, 7000L)
+        var requested = false
+        providers.forEach { provider ->
+            try {
+                manager.getCurrentLocation(provider, gpsCancellation, mainExecutor) { location ->
+                    if (gpsLaunchFinished) return@getCurrentLocation
+                    if (location != null) {
+                        val current = bestCameraLocation
+                        if (current == null || !current.hasAccuracy() ||
+                            (location.hasAccuracy() && location.accuracy < current.accuracy)) {
+                            bestCameraLocation = location
+                        }
+                        // Un breve margine permette al GPS di superare il fix di rete.
+                        gpsHandler.removeCallbacks(timeout)
+                        gpsHandler.postDelayed(timeout, 1200L)
+                    }
+                }
+                requested = true
+            } catch (_: SecurityException) { }
+              catch (_: Exception) { }
+        }
+        if (!requested) finishLocationAcquisition()
+    }
+
+    private fun finishLocationAcquisition() {
+        if (gpsLaunchFinished) return
+        gpsLaunchFinished = true
+        gpsHandler.removeCallbacksAndMessages(null)
+        gpsCancellation?.cancel()
+        gpsCancellation = null
+        startNativeCameraSession(bestCameraLocation)
+    }
+
+    private fun startNativeCameraSession(location: Location? = null) {
         try {
             prepareArchiveFolders()
-            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file = File(File(archiveRoot(false), ".FA_TEMP"), "FA_TEMP_$stamp.jpg")
-            pendingPhotoFile = file
-            pendingPhoto = archiveFileUri(file)
-            cameraLauncher.launch(pendingPhoto!!)
+            val folder = prefs.getString(lastFolderKey(activeCategory), "") ?: ""
+            val serviceIntent = Intent(this, CameraOverlayService::class.java).apply {
+                putExtra(CameraOverlayService.EXTRA_CATEGORY, activeCategory)
+                putExtra(CameraOverlayService.EXTRA_FOLDER, folder)
+                putExtra(CameraOverlayService.EXTRA_START_TIME, System.currentTimeMillis())
+                location?.let {
+                    putExtra(CameraOverlayService.EXTRA_GPS_LATITUDE, it.latitude)
+                    putExtra(CameraOverlayService.EXTRA_GPS_LONGITUDE, it.longitude)
+                    putExtra(CameraOverlayService.EXTRA_GPS_TIME, it.time)
+                    if (it.hasAltitude()) putExtra(CameraOverlayService.EXTRA_GPS_ALTITUDE, it.altitude)
+                    if (it.hasAccuracy()) putExtra(CameraOverlayService.EXTRA_GPS_ACCURACY, it.accuracy)
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+            else startService(serviceIntent)
+
+            // Non usare resolveActivity(): su Android recenti la visibilità dei pacchetti
+            // può far risultare assente la fotocamera anche quando è installata.
+            // Prova direttamente ad aprire l'interfaccia completa della fotocamera.
+            val cameraIntent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+            cameraSessionLaunched = true
+            try {
+                startActivity(cameraIntent)
+            } catch (e: android.content.ActivityNotFoundException) {
+                cameraSessionLaunched = false
+                stopService(Intent(this, CameraOverlayService::class.java))
+                toast("Android non ha trovato un'app fotocamera compatibile")
+            }
         } catch (e: Exception) {
-            pendingPhotoFile?.delete()
-            pendingPhotoFile = null
-            pendingPhoto = null
-            toast("Fotocamera non disponibile: ${e.localizedMessage ?: "errore"}")
-            showHome()
+            cameraSessionLaunched = false
+            stopService(Intent(this, CameraOverlayService::class.java))
+            toast("Avvio fotocamera non riuscito: ${e.localizedMessage ?: "errore"}")
         }
     }
 
@@ -353,10 +642,14 @@ class MainActivity : ComponentActivity() {
 
     // I percorsi sono relativi alla categoria, ad esempio AMMEGA/CARTEGGIATRICE/RECINZIONE.
     private fun folders(category: String): MutableList<String> {
-        // Unisce le cartelle registrate nelle preferenze con quelle realmente presenti
-        // sul telefono: così una cartella fisica non scompare se manca la voce interna.
-        val saved = prefs.getStringSet(folderKey(category), setOf("Generale"))?.toMutableSet()
-            ?: mutableSetOf("Generale")
+        val now = System.currentTimeMillis()
+        cachedFolderLists[category]?.let { cached ->
+            if (now - cached.first < 5000L) return cached.second.toMutableList()
+        }
+        // Una sola scansione per categoria ogni 5 secondi: i normali tocchi
+        // di navigazione e selezione riutilizzano l'elenco già ricavato.
+        val saved = prefs.getStringSet(folderKey(category), emptySet())?.toMutableSet()
+            ?: mutableSetOf()
         val expanded = mutableSetOf<String>()
         saved.forEach { raw ->
             val clean = raw.trim('/').split('/').filter { it.isNotBlank() }
@@ -385,12 +678,27 @@ class MainActivity : ComponentActivity() {
                     }
             }
         }
-        if (expanded.isEmpty()) expanded.add("Generale")
-        return expanded.sorted().toMutableList()
+        val emptyDefaultGeneral = listOf(false, true).all { isVideo ->
+            val directory = File(archiveRoot(isVideo), "$category/Generale")
+            !directory.exists() || (directory.isDirectory && directory.listFiles().isNullOrEmpty())
+        }
+        if (emptyDefaultGeneral) expanded.remove("Generale")
+        val result = expanded.sorted()
+        cachedFolderLists[category] = now to result
+        return result.toMutableList()
+    }
+
+    private fun invalidateArchiveCaches() {
+        cachedPhotoItems = null
+        cachedPhotoItemsAt = 0L
+        cachedFolderLists.clear()
     }
 
     private fun saveFolderList(category: String, list: List<String>) {
         prefs.edit().putStringSet(folderKey(category), list.toSet()).apply()
+        cachedFolderLists.remove(category)
+        cachedPhotoItems = null
+        cachedPhotoItemsAt = 0L
     }
 
     private fun folderChildren(category: String, parent: String): List<String> {
@@ -504,10 +812,11 @@ class MainActivity : ComponentActivity() {
 
         fun refreshFolders(select: String? = null) {
             val category = categorySpinner.selectedItem?.toString() ?: activeCategory
-            val list = folders(category)
+            val rootLabel = "— Cartella principale —"
+            val list = listOf(rootLabel) + folders(category)
             folderSpinner.adapter = darkSpinnerAdapter(list)
-            val preferred = select ?: prefs.getString(lastFolderKey(category), "Generale")
-            val index = list.indexOf(preferred)
+            val preferred = select ?: prefs.getString(lastFolderKey(category), "") ?: ""
+            val index = if (preferred.isBlank()) 0 else list.indexOf(preferred)
             folderSpinner.setSelection(if (index >= 0) index else 0)
         }
 
@@ -525,7 +834,8 @@ class MainActivity : ComponentActivity() {
                 .setNegativeButton("Annulla", null)
                 .setPositiveButton("Crea") { _, _ ->
                     val category = categorySpinner.selectedItem.toString()
-                    val parent = folderSpinner.selectedItem?.toString() ?: ""
+                    val selectedParent = folderSpinner.selectedItem?.toString() ?: "— Cartella principale —"
+                    val parent = if (selectedParent == "— Cartella principale —") "" else selectedParent
                     val newName = input.text.toString().trim()
                     if (newName.isNotBlank()) refreshFolders(addFolderPath(category, parent, newName))
                 }.show()
@@ -591,15 +901,11 @@ class MainActivity : ComponentActivity() {
                 val category = categorySpinner.selectedItem.toString()
                 // Il valore dello spinner può essere un percorso completo:
                 // sanificare ogni segmento separatamente preserva le sottocartelle.
-                val folder = (folderSpinner.selectedItem?.toString() ?: "Generale")
-                    .trim('/')
-                    .split('/')
-                    .filter { it.isNotBlank() }
-                    .joinToString("/") { safeFolder(it) }
-                    .ifBlank { "Generale" }
+                val selectedFolder = folderSpinner.selectedItem?.toString() ?: "— Cartella principale —"
+                val folder = if (selectedFolder == "— Cartella principale —") "" else selectedFolder.trim('/').split('/').filter { it.isNotBlank() }.joinToString("/") { safeFolder(it) }
                 val extension = ".$sourceExtension"
                 val fileName = if (baseName.lowercase(Locale.ROOT).endsWith(extension)) baseName else "$baseName$extension"
-                val destinationDir = File(archiveRoot(isVideo), "$category/$folder")
+                val destinationDir = File(archiveRoot(isVideo), if (folder.isBlank()) category else "$category/$folder")
                 val destination = File(destinationDir, fileName)
                 prefs.edit().putString(lastFolderKey(category), folder).apply()
                 val saved = try {
@@ -648,6 +954,10 @@ class MainActivity : ComponentActivity() {
     private data class PhotoItem(val file: File, val uri: Uri, val name: String, val path: String, val isVideo: Boolean = false)
 
     private fun listPhotos(): List<PhotoItem> {
+        val now = System.currentTimeMillis()
+        cachedPhotoItems?.let { cached ->
+            if (now - cachedPhotoItemsAt < 1500L) return cached
+        }
         val result = mutableListOf<PhotoItem>()
         listOf(false, true).forEach { isVideo ->
             val root = archiveRoot(isVideo)
@@ -657,27 +967,30 @@ class MainActivity : ComponentActivity() {
                 .forEach { file ->
                     val rootName = if (isVideo) "Movies" else "Pictures"
                     val relative = file.relativeTo(Environment.getExternalStorageDirectory()).path.replace(File.separatorChar, '/')
-                    if (relative.startsWith("$rootName/FA archivio principale/PERSONALE/") ||
-                        relative.startsWith("$rootName/FA archivio principale/LAVORO/")) {
-                        try {
-                            result.add(PhotoItem(file, archiveFileUri(file), file.name, "/$relative", isVideo))
-                        } catch (_: Exception) { }
+                    if (relative.startsWith("$rootName/FotoArchivio/PERSONALE/") ||
+                        relative.startsWith("$rootName/FotoArchivio/LAVORO/")) {
+                        try { result.add(PhotoItem(file, archiveFileUri(file), file.name, "/$relative", isVideo)) }
+                        catch (_: Exception) { }
                     }
                 }
         }
-        return result.sortedByDescending { it.file.lastModified() }
+        val sorted = result.sortedByDescending { it.file.lastModified() }
+        cachedPhotoItems = sorted
+        cachedPhotoItemsAt = now
+        return sorted
     }
 
     private fun isInCategory(path: String, category: String): Boolean =
-        path.trimStart('/').startsWith("Pictures/FA archivio principale/$category/") || path.trimStart('/').startsWith("Movies/FA archivio principale/$category/")
+        path.trimStart('/').startsWith("Pictures/FotoArchivio/$category/") || path.trimStart('/').startsWith("Movies/FotoArchivio/$category/")
 
     private fun categoryFolderPath(item: PhotoItem, category: String, folder: String): String {
         val root = if (item.isVideo) "Movies" else "Pictures"
-        return "$root/FA archivio principale/$category/$folder/"
+        return "$root/FotoArchivio/$category/$folder/"
     }
 
     private fun showFileManager() {
         selectedPhotos.clear()
+        selectedFolders.clear()
         val root = page("Archivio FA")
         root.addView(TextView(this).apply {
             text = "Scegli l'archivio da esplorare"
@@ -702,7 +1015,7 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("COLLEGA AL PC VIA USB") {
             AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
-                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA archivio principale e i video in Movies → FA archivio principale: copia PERSONALE e LAVORO da entrambe le posizioni.")
+                .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FotoArchivio e i video in Movies → FotoArchivio: copia PERSONALE e LAVORO da entrambe le posizioni.")
                 .setPositiveButton("OK", null).show()
         }, LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(actionButton("INDIETRO") { showHome() }, LinearLayout.LayoutParams(-1, dp(48)))
@@ -718,6 +1031,8 @@ class MainActivity : ComponentActivity() {
     private fun showFolderList(category: String) {
         explorerCategory = category
         explorerFolder = ""
+        selectedPhotos.clear()
+        selectedFolders.clear()
         prefs.edit().putString(lastFolderKey(category), "").apply()
         showExplorerFolder()
     }
@@ -741,36 +1056,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showExplorerFolder() {
-        val root = page(explorerCategory)
+        val root = page("")
         val current = explorerFolder.trim('/')
-        val titlePath = if (current.isBlank()) "Archivio " + explorerCategory
-            else "Archivio " + explorerCategory + " / " + current
-        root.addView(TextView(this).apply {
-            text = titlePath
-            textSize = 15f
-            setTextColor(0xFFF1E9DD.toInt())
-            setPadding(0, 0, 0, dp(8))
-        })
-        val crumbs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val parts = current.split('/').filter { it.isNotBlank() }
-        val crumbLabels = mutableListOf("⌂")
+        val crumbs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        crumbs.addView(breadcrumbButton(explorerCategory, parts.isEmpty()) {
+            explorerFolder = ""; selectedPhotos.clear(); selectedFolders.clear()
+            prefs.edit().putString(lastFolderKey(explorerCategory), "").apply(); showExplorerFolder()
+        }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(6) })
         var built = ""
-        parts.forEach { part ->
+        parts.forEachIndexed { index, part ->
             built = if (built.isEmpty()) part else built + "/" + part
-            crumbLabels.add(built)
-        }
-        crumbLabels.forEachIndexed { index, value ->
-            crumbs.addView(actionButton(if (index == 0) "⌂" else parts[index - 1]) {
-                explorerFolder = if (index == 0) "" else value
-                prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
-                showExplorerFolder()
-            }, LinearLayout.LayoutParams(-2, dp(40)).apply { rightMargin = dp(4) })
+            val targetPath = built
+            crumbs.addView(TextView(this).apply { text = "›"; textSize = 16f; setTextColor(0xFFB9A98F.toInt()); gravity = Gravity.CENTER; setPadding(0, 0, dp(5), 0) })
+            crumbs.addView(breadcrumbButton(part, index == parts.lastIndex) {
+                explorerFolder = targetPath; selectedPhotos.clear(); selectedFolders.clear()
+                prefs.edit().putString(lastFolderKey(explorerCategory), targetPath).apply(); showExplorerFolder()
+            }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(6) })
         }
         root.addView(HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            isFillViewport = false
-            addView(crumbs)
-        }, LinearLayout.LayoutParams(-1, dp(46)))
+            isHorizontalScrollBarEnabled = false; isFillViewport = false; addView(crumbs)
+        }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(3); bottomMargin = dp(5) })
         root.addView(actionButton("＋ NUOVA SOTTOCARTELLA") {
             createChildFolder(current)
         }, LinearLayout.LayoutParams(-1, dp(46)))
@@ -779,50 +1085,73 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putString(lastFolderKey(explorerCategory), current).apply()
             importLauncher.launch(arrayOf("image/*", "video/*"))
         }, LinearLayout.LayoutParams(-1, dp(48)))
-        if (current.isNotBlank()) {
-            root.addView(actionButton("↑ CARTELLA SUPERIORE") {
-                explorerFolder = current.substringBeforeLast('/', "")
-                prefs.edit().putString(lastFolderKey(explorerCategory), explorerFolder).apply()
-                showExplorerFolder()
-            }, LinearLayout.LayoutParams(-1, dp(42)))
-        } else {
+        if (current.isBlank()) {
             root.addView(actionButton("← GESTIONE ARCHIVIO") { showFileManager() },
-                LinearLayout.LayoutParams(-1, dp(42)))
+                LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(4) })
         }
 
-        val children = folderChildren(explorerCategory, current)
+        val folderPaths = folders(explorerCategory)
+        val prefix = if (current.isBlank()) "" else current + "/"
+        val children = folderPaths.mapNotNull { path ->
+            if (!path.startsWith(prefix) || path == current) null
+            else path.removePrefix(prefix).substringBefore('/').takeIf { it.isNotBlank() }
+        }.distinct().sorted()
         val allItems = listPhotos().filter { isInCategory(it.path, explorerCategory) }
         val exactRelative = current.trim('/')
+        // Un solo passaggio calcola i conteggi per tutte le cartelle antenate.
+        val descendantCounts = mutableMapOf<String, Int>()
+        allItems.forEach { item ->
+            var parentPath = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").substringBeforeLast('/', "")
+            while (parentPath.isNotBlank()) {
+                descendantCounts[parentPath] = (descendantCounts[parentPath] ?: 0) + 1
+                parentPath = parentPath.substringBeforeLast('/', "")
+            }
+        }
         val photos = allItems.filter {
-            val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
-            val parentFolder = relative.substringBeforeLast('/', "")
-            parentFolder == exactRelative
+            val relative = it.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
+            relative.substringBeforeLast('/', "") == exactRelative
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
-        val descendantCount = allItems.count {
-            val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
-            if (exactRelative.isBlank()) relative.isNotBlank()
-            else relative.startsWith(exactRelative + "/")
+        val totalFiles = if (exactRelative.isBlank()) allItems.size else (descendantCounts[exactRelative] ?: 0)
+        val folderPrefix = if (exactRelative.isBlank()) "" else exactRelative + "/"
+        val totalSubfolders = folderPaths.count { path ->
+            path != exactRelative && (exactRelative.isBlank() || path.startsWith(folderPrefix))
         }
         root.addView(TextView(this).apply {
-            text = children.size.toString() + " cartelle  •  " + photos.count { !it.isVideo } +
-                " foto  •  " + photos.count { it.isVideo } + " video" +
-                (if (descendantCount > 0) "  •  " + descendantCount + " elementi nelle sottocartelle" else "")
-            textSize = 12f
-            setTextColor(0xFFC7B9A7.toInt())
-            setPadding(0, dp(6), 0, dp(6))
+            text = totalFiles.toString() + " file totali (incluse sottocartelle)  •  " + totalSubfolders + " sottocartelle"
+            textSize = 12f; setTextColor(0xFFC7B9A7.toInt()); setPadding(0, dp(5), 0, dp(7))
         })
+        val selectedCount = selectedFolders.size + selectedPhotos.size
+        val selectedActionButton = actionButton("ELEMENTI SELEZIONATI (" + selectedCount + ")") {
+            showSelectedItemsActions()
+        }
+        selectedActionButton.visibility = if (selectedCount > 0) View.VISIBLE else View.GONE
+        root.addView(selectedActionButton, LinearLayout.LayoutParams(-1, dp(44)))
+        fun refreshSelectionIndicator() {
+            val countNow = selectedFolders.size + selectedPhotos.size
+            selectedActionButton.text = "ELEMENTI SELEZIONATI (" + countNow + ")"
+            selectedActionButton.visibility = if (countNow > 0) View.VISIBLE else View.GONE
+        }
         val scroll = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         children.forEach { child ->
             val fullPath = if (current.isBlank()) child else current + "/" + child
-            val count = allItems.count {
-                val relative = it.path.substringAfter("/FA archivio principale/" + explorerCategory + "/", "").trimEnd('/')
-                relative == fullPath || relative.startsWith(fullPath + "/")
-            }
+            val count = descendantCounts[fullPath] ?: 0
+            val subfolderCount = folderPaths.count { it.startsWith(fullPath + "/") }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8), dp(10), dp(8), dp(10))
+            }
+            val folderCheck = CheckBox(this).apply {
+                text = "MULTI-SELEZIONE"
+                textSize = 10f
+                setTextColor(0xFFC7B9A7.toInt())
+                buttonTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
+                isChecked = selectedFolders.contains(fullPath)
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedFolders.add(fullPath) else selectedFolders.remove(fullPath)
+                    refreshSelectionIndicator()
+                }
             }
             row.addView(TextView(this).apply {
                 text = "📁"
@@ -836,14 +1165,17 @@ class MainActivity : ComponentActivity() {
                 setTextColor(0xFFF1E9DD.toInt())
             })
             labels.addView(TextView(this).apply {
-                text = count.toString() + " elementi"
+                text = count.toString() + " elementi  •  " + subfolderCount + " sottocartelle"
                 textSize = 12f
                 setTextColor(0xFFC7B9A7.toInt())
             })
             row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(folderCheck)
             row.isClickable = true
             row.isFocusable = true
             row.setOnClickListener {
+                selectedPhotos.clear()
+                selectedFolders.clear()
                 explorerFolder = fullPath
                 prefs.edit().putString(lastFolderKey(explorerCategory), fullPath).apply()
                 showExplorerFolder()
@@ -862,6 +1194,15 @@ class MainActivity : ComponentActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(6), 0, dp(6))
             }
+            val photoCheck = CheckBox(this).apply {
+                buttonTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
+                isChecked = selectedPhotos.contains(photo.uri.toString())
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedPhotos.add(photo.uri.toString()) else selectedPhotos.remove(photo.uri.toString())
+                    refreshSelectionIndicator()
+                }
+            }
+            row.addView(photoCheck)
             val thumb = ImageView(this).apply {
                 if (photo.isVideo) {
                     setImageResource(android.R.drawable.ic_media_play)
@@ -905,11 +1246,7 @@ class MainActivity : ComponentActivity() {
         })
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(ImageView(this).apply {
-            setImageResource(R.drawable.fa_home_image)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Fotocamera vintage su album fotografico"
-        }, LinearLayout.LayoutParams(-1, 0, 0.45f))
+        // Immagine vintage usata come watermark trasparente sullo sfondo della pagina.
         root.addView(TextView(this).apply {
             text = "Creato da M@xm@so74 con Chatgpt"
             textSize = 11f
@@ -921,10 +1258,154 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, dp(42))
         }
-        bottom.addView(actionButton("CARTELLE") { showFolderList(explorerCategory) },
+        bottom.addView(actionButton("HOME") { showHome() },
             LinearLayout.LayoutParams(-1, dp(50)))
         root.addView(bottom)
         setContentView(root)
+    }
+
+    private fun showSelectedItemsActions() {
+        val count = selectedFolders.size + selectedPhotos.size
+        if (count == 0) return
+        val options = arrayOf("Seleziona tutti gli elementi di questa cartella", "Sposta selezione", "Esporta selezione in ZIP", "Elimina selezione", "Deseleziona tutto")
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("ELEMENTI SELEZIONATI (" + count + ")")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        folderChildren(explorerCategory, explorerFolder).forEach { child ->
+                            selectedFolders.add(if (explorerFolder.isBlank()) child else explorerFolder.trimEnd('/') + "/" + child)
+                        }
+                        listPhotos().filter { photo ->
+                            if (!isInCategory(photo.path, explorerCategory)) false
+                            else photo.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").substringBeforeLast("/", "") == explorerFolder.trim('/')
+                        }.forEach { selectedPhotos.add(it.uri.toString()) }
+                        showExplorerFolder()
+                    }
+                    1 -> moveSelectedItems()
+                    2 -> { val chosen = selectedMediaForActions(); if (chosen.isEmpty()) toast("La selezione non contiene foto o video") else exportZip(chosen, "FA-Selezione") }
+                    3 -> confirmDeleteSelectedItems()
+                    4 -> { selectedFolders.clear(); selectedPhotos.clear(); showExplorerFolder() }
+                }
+            }.show()
+    }
+
+    private fun selectedMediaForActions(): List<PhotoItem> {
+        val selectedPaths = selectedFolders.toList()
+        return listPhotos().filter { item ->
+            if (selectedPhotos.contains(item.uri.toString())) true
+            else if (!isInCategory(item.path, explorerCategory)) false
+            else {
+                val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+                selectedPaths.any { relative == it || relative.startsWith(it + "/") }
+            }
+        }.distinctBy { it.file.absolutePath }
+    }
+
+    private fun confirmDeleteSelectedItems() {
+        val foldersToDelete = selectedFolders.toList().filterNot { path ->
+            selectedFolders.any { other -> other != path && path.startsWith(other + "/") }
+        }
+        val photosToDelete = selectedMediaForActions().filter { photo ->
+            val relative = photo.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+            !foldersToDelete.any { relative == it || relative.startsWith(it + "/") }
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Confermi eliminazione?")
+            .setMessage("Saranno eliminati gli elementi selezionati solo dall'archivio FA. Gli originali in DCIM/Camera restano intatti.")
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Elimina") { _, _ ->
+                var deleted = 0
+                photosToDelete.forEach { if (deleteFaItem(it)) deleted++ }
+                foldersToDelete.forEach { path ->
+                    listOf(false, true).forEach { isVideo ->
+                        val archive = File(archiveRoot(isVideo), explorerCategory).canonicalFile
+                        val folder = File(archive, path).canonicalFile
+                        if (folder.path.startsWith(archive.path + File.separator) && folder.exists() && folder.deleteRecursively()) deleted++
+                    }
+                    saveFolderList(explorerCategory, folders(explorerCategory).filterNot { it == path || it.startsWith(path + "/") })
+                }
+                selectedFolders.clear(); selectedPhotos.clear()
+                invalidateArchiveCaches()
+                toast(deleted.toString() + " elementi eliminati")
+                showExplorerFolder()
+            }.show()
+    }
+
+    private fun moveSelectedItems() {
+        val folderRoots = selectedFolders.toList().filterNot { path ->
+            selectedFolders.any { other -> other != path && path.startsWith(other + "/") }
+        }
+        val media = selectedMediaForActions()
+        val photosToMove = media.filter { photo ->
+            val relative = photo.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+            !folderRoots.any { relative == it || relative.startsWith(it + "/") }
+        }
+        val targets = mutableListOf<Pair<String, String>>()
+        listOf("PERSONALE", "LAVORO").forEach { category ->
+            targets.add(category to "")
+            folders(category).forEach { targets.add(category to it) }
+        }
+        val labels = targets.map { it.first + " / " + if (it.second.isBlank()) "Cartella principale" else it.second }.toTypedArray()
+        val last = prefs.getString("fa_last_move_destination", "") ?: ""
+        val initial = targets.indexOfFirst { it.first + "/" + it.second == last }.coerceAtLeast(0)
+        var chosen = initial
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Sposta selezione")
+            .setSingleChoiceItems(labels, initial) { _, which -> chosen = which }
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Sposta") { _, _ ->
+                val category = targets[chosen].first
+                val destinationFolder = targets[chosen].second
+                val sourceCategory = explorerCategory
+                val movedDirs = mutableListOf<Pair<File, File>>()
+                val movedFiles = mutableListOf<Pair<File, File>>()
+                var ok = true
+                for (oldPath in folderRoots) {
+                    val newPath = if (destinationFolder.isBlank()) oldPath.substringAfterLast('/') else destinationFolder + "/" + oldPath.substringAfterLast('/')
+                    if (category == sourceCategory && (newPath == oldPath || newPath.startsWith(oldPath + "/") || oldPath.startsWith(newPath + "/"))) { ok = false; break }
+                    for (isVideo in listOf(false, true)) {
+                        val oldDir = File(archiveRoot(isVideo), "$sourceCategory/$oldPath")
+                        if (!oldDir.exists()) continue
+                        val newDir = File(archiveRoot(isVideo), "$category/$newPath")
+                        if (newDir.exists()) { ok = false; break }
+                        newDir.parentFile?.mkdirs()
+                        if (!oldDir.renameTo(newDir)) { ok = false; break }
+                        movedDirs.add(newDir to oldDir)
+                    }
+                    if (!ok) break
+                }
+                if (ok) for (photo in photosToMove) {
+                    val dir = File(archiveRoot(photo.isVideo), if (destinationFolder.isBlank()) category else "$category/$destinationFolder")
+                    val target = File(dir, photo.file.name)
+                    if (target.exists()) { ok = false; break }
+                    dir.mkdirs()
+                    if (!photo.file.renameTo(target)) { ok = false; break }
+                    movedFiles.add(target to photo.file)
+                }
+                if (!ok) {
+                    movedFiles.asReversed().forEach { (to, from) -> to.renameTo(from) }
+                    movedDirs.asReversed().forEach { (to, from) -> from.parentFile?.mkdirs(); to.renameTo(from) }
+                    toast("Spostamento non riuscito: archivio ripristinato dove possibile")
+                } else {
+                    val sourceList = folders(sourceCategory).toMutableSet()
+                    val targetList = if (category == sourceCategory) sourceList else folders(category).toMutableSet()
+                    folderRoots.forEach { oldPath ->
+                        val newPath = if (destinationFolder.isBlank()) oldPath.substringAfterLast('/') else destinationFolder + "/" + oldPath.substringAfterLast('/')
+                        sourceList.filter { it == oldPath || it.startsWith(oldPath + "/") }.forEach { old ->
+                            sourceList.remove(old); targetList.add(newPath + old.removePrefix(oldPath))
+                        }
+                    }
+                    saveFolderList(sourceCategory, sourceList.toList())
+                    if (category != sourceCategory) saveFolderList(category, targetList.toList())
+                    prefs.edit().putString("fa_last_move_destination", category + "/" + destinationFolder).apply()
+                    invalidateArchiveCaches()
+                    selectedFolders.clear(); selectedPhotos.clear()
+                    explorerCategory = category; explorerFolder = destinationFolder
+                    prefs.edit().putString(lastFolderKey(category), destinationFolder).apply()
+                    toast("Spostamento completato"); showExplorerFolder()
+                }
+            }.show()
     }
 
     private fun folderActions(path: String) {
@@ -980,7 +1461,7 @@ class MainActivity : ComponentActivity() {
         val hasMedia = listPhotos().any { item ->
             if (!isInCategory(item.path, explorerCategory)) false
             else {
-                val relative = item.path.substringAfter("/FA archivio principale/" + explorerCategory, "").trim('/')
+                val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory, "").trim('/')
                 relative == path || relative.startsWith(path + "/")
             }
         }
@@ -996,6 +1477,46 @@ class MainActivity : ComponentActivity() {
             it == path || it.startsWith(path + "/")
         })
         showExplorerFolder()
+    }
+
+    private fun showBulkFolderActions() {
+        val chosen = selectedFolders.toList()
+        if (chosen.isEmpty()) { toast("Seleziona prima una o più cartelle"); return }
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("${chosen.size} cartelle selezionate")
+            .setItems(arrayOf("Elimina cartelle vuote selezionate", "Deseleziona tutto")) { _, which ->
+                if (which == 1) {
+                    selectedFolders.clear()
+                    showExplorerFolder()
+                    return@setItems
+                }
+                val allFolders = folders(explorerCategory)
+                val media = listPhotos().filter { isInCategory(it.path, explorerCategory) }
+                val nonEmpty = chosen.filter { path ->
+                    val hasChild = allFolders.any { it.startsWith(path + "/") }
+                    val hasMedia = media.any { item ->
+                        val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+                        relative == path || relative.startsWith(path + "/")
+                    }
+                    hasChild || hasMedia
+                }
+                if (nonEmpty.isNotEmpty()) {
+                    toast("Alcune cartelle contengono elementi: non sono state eliminate")
+                    return@setItems
+                }
+                chosen.forEach { path ->
+                    listOf(false, true).forEach { isVideo ->
+                        File(archiveRoot(isVideo), "$explorerCategory/$path").delete()
+                    }
+                }
+                saveFolderList(explorerCategory, allFolders.filterNot { path ->
+                    chosen.any { path == it || path.startsWith(it + "/") }
+                })
+                selectedFolders.clear()
+                showExplorerFolder()
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
     }
 
     private fun showBulkPhotoActions() {
@@ -1141,7 +1662,7 @@ class MainActivity : ComponentActivity() {
                     1 -> exportZip(all.filter { isInCategory(it.path, "PERSONALE") }, "FA-PERSONALE")
                     2 -> exportZip(all.filter { isInCategory(it.path, "LAVORO") }, "FA-LAVORO")
                     3 -> AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle("Trasferimento USB al PC")
-                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FA archivio principale e i video in Movies → FA archivio principale; copia PERSONALE e LAVORO da entrambe le posizioni.")
+                        .setMessage("Collega il Motorola al PC con un cavo USB dati. Nella notifica USB scegli «Trasferimento file». In Windows apri Esplora file → Motorola → Memoria interna condivisa. Le foto sono in Pictures → FotoArchivio e i video in Movies → FotoArchivio; copia PERSONALE e LAVORO da entrambe le posizioni.")
                         .setPositiveButton("OK", null).show()
                 }
             }.show()
@@ -1159,7 +1680,7 @@ class MainActivity : ComponentActivity() {
             val zipUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (zipUri == null) { toast("Non riesco a creare il file ZIP"); return }
             val entries = items.map { photo ->
-                Triple(photo.uri, photo.path.substringAfter("/FA archivio principale/").trimEnd('/'), photo.name)
+                Triple(photo.uri, photo.path.substringAfter("/FotoArchivio/").trimEnd('/'), photo.name)
             }
             FaZipExporter.write(contentResolver, zipUri, entries)
             val share = Intent(Intent.ACTION_SEND).apply {
@@ -1189,3 +1710,5 @@ private class SimpleItemSelectedListener(
         id: Long
     ) = action()
 }
+
+// Build trigger: include the immediate camera launch and asynchronous GPS startup changes.

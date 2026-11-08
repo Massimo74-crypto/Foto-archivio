@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="fa_pictures" path="Pictures/FA archivio principale/" />
-    <external-path name="fa_movies" path="Movies/FA archivio principale/" />
+    <!-- Percorsi correnti: archivio foto e video usato da FA 0.4.7 e successive. -->
+    <external-path name="fa_pictures_current" path="Pictures/FotoArchivio/" />
+    <external-path name="fa_movies_current" path="Movies/FotoArchivio/" />
+
+    <!-- Mantiene leggibili gli archivi delle versioni precedenti. -->
+    <external-path name="fa_pictures_legacy" path="Pictures/FA archivio principale/" />
+    <external-path name="fa_movies_legacy" path="Movies/FA archivio principale/" />
+    <external-path name="fa_pictures_old" path="Pictures/FA/" />
+    <external-path name="fa_movies_old" path="Movies/FA/" />
 </paths>

@@ -21,6 +21,18 @@ jobs:
         run: |
           mkdir -p FA-Android/app/src/main/res/drawable-nodpi
           curl -L --fail --silent --show-error "https://raw.githubusercontent.com/Massimo74-crypto/Foto-archivio/main/file_00000000c53882108ed52dd93d0cc7bb.png" -o FA-Android/app/src/main/res/drawable-nodpi/fa_home_image.png
+      - name: Install separate vintage movie camera overlay
+        run: |
+          mkdir -p FA-Android/app/src/main/res/drawable-nodpi
+          base64 --decode .github/assets/fa_vintage_movie_camera.webp.b64 > FA-Android/app/src/main/res/drawable-nodpi/fa_vintage_movie_camera.webp
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          image = Path("FA-Android/app/src/main/res/drawable-nodpi/fa_vintage_movie_camera.webp").read_bytes()
+          assert image[:4] == b"RIFF" and image[8:12] == b"WEBP", "Invalid WebP header"
+          assert struct.unpack("<I", image[4:8])[0] + 8 == len(image), "WebP length mismatch"
+          print(f"Vintage camera WebP verified: {len(image)} bytes")
+          PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
