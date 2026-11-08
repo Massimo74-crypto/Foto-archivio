@@ -360,13 +360,34 @@ class CameraOverlayService : Service() {
     private fun filePath(file: File): String =
         try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
 
+    // Il solo file stabile non basta: durante una pausa potrebbe non crescere.
+    // MediaMetadataRetriever verifica che il contenitore video sia già leggibile
+    // e che contenga una durata valida prima di mostrare il popup.
+    private fun isReadableCompletedVideo(file: File): Boolean {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            duration > 0L
+        } catch (_: Exception) {
+            false
+        } finally {
+            try { retriever.release() } catch (_: Exception) { }
+        }
+    }
+
     private fun handleCameraFileEvent(file: File, event: Int) {
         val path = filePath(file)
         val isCreate = (event and FileObserver.CREATE) != 0
         val isMovedFrom = (event and FileObserver.MOVED_FROM) != 0
         val isMovedTo = (event and FileObserver.MOVED_TO) != 0
+        val isCloseWrite = (event and FileObserver.CLOSE_WRITE) != 0
         val isCompleteEvent = (event and (FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO)) != 0
         if (isCompleteEvent) completedFilePaths.add(path)
+        // CLOSE_WRITE è il segnale più vicino allo Stop disponibile a FA:
+        // avvia la verifica rapida, ma il file deve anche risultare riproducibile.
+        if (isVideo(file) && (isCloseWrite || isMovedTo)) publishedVideoPaths.add(path)
 
         // Se il video precedente era stato rinominato in ritardo e il relativo
         // MOVED_TO non è arrivato, non lasciare che il suo flag blocchi il video
@@ -485,16 +506,14 @@ class CameraOverlayService : Service() {
         pendingVideoStableChecks = 0
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
         val show = Runnable {
-            // Per i video attendiamo che dimensione e data di modifica restino
-            // invariate per 4 controlli consecutivi: alcuni firmware Motorola
-            // emettono CLOSE_WRITE anche durante l'avvio della registrazione.
+            // Dopo l'attesa iniziale di 500 ms verifichiamo che il video
+            // sia stato scritto, che dimensione e timestamp siano stabili per
+            // un altro intervallo di 500 ms e che Android riesca a leggerne la durata.
             val currentFile = pendingPopupFile ?: return@Runnable
             val currentPath = filePath(currentFile)
             if (isVideo(currentFile)) {
-                // La stabilità da sola non prova che la registrazione sia terminata:
-                // una pausa temporanea di scrittura può durare diversi secondi.
                 if (!publishedVideoPaths.contains(currentPath)) {
-                    pendingPopupRunnable?.let { handler.postDelayed(it, 1000L) }
+                    pendingPopupRunnable?.let { handler.postDelayed(it, 500L) }
                     return@Runnable
                 }
                 val length = currentFile.length()
@@ -506,8 +525,12 @@ class CameraOverlayService : Service() {
                 }
                 pendingVideoLastLength = length
                 pendingVideoLastModified = modified
-                if (pendingVideoStableChecks < 4) {
-                    pendingPopupRunnable?.let { handler.postDelayed(it, 1000L) }
+                if (pendingVideoStableChecks < 1) {
+                    pendingPopupRunnable?.let { handler.postDelayed(it, 500L) }
+                    return@Runnable
+                }
+                if (!isReadableCompletedVideo(currentFile)) {
+                    pendingPopupRunnable?.let { handler.postDelayed(it, 500L) }
                     return@Runnable
                 }
             }
