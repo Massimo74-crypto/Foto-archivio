@@ -66,7 +66,9 @@ class CameraOverlayService : Service() {
     private val completedFilePaths = mutableSetOf<String>()
     private var cameraDirectoryObserver: FileObserver? = null
     private var pendingPopupFile: File? = null
+    private var pendingPopupWasMoved = false
     private var pendingPopupRunnable: Runnable? = null
+    private var displayedFileWasMoved = false
     private var sourceReadyForSave = false
     private var pendingSaveStartedAt = 0L
     private var pendingSaveFile: File? = null
@@ -135,7 +137,7 @@ class CameraOverlayService : Service() {
             cameraDirectoryObserver?.stopWatching()
             cameraDirectoryObserver = object : FileObserver(
                 cameraDir.absolutePath,
-                FileObserver.CREATE or FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+                FileObserver.CREATE or FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or FileObserver.MOVED_FROM
             ) {
                 override fun onEvent(event: Int, path: String?) {
                     if (path.isNullOrBlank()) return
@@ -157,15 +159,48 @@ class CameraOverlayService : Service() {
 
     private fun handleCameraFileEvent(file: File, event: Int) {
         val path = filePath(file)
+        val isMovedFrom = (event and FileObserver.MOVED_FROM) != 0
+        val isMovedTo = (event and FileObserver.MOVED_TO) != 0
         val isCompleteEvent = (event and (FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO)) != 0
         if (isCompleteEvent) completedFilePaths.add(path)
 
         val displayedPath = displayedFile?.let { filePath(it) }
+
+        // Motorola può scrivere su un nome provvisorio e poi rinominare la foto.
+        // Seguiamo MOVED_FROM/MOVED_TO per aggiornare il riferimento usato dal popup.
+        if (isMovedFrom) {
+            if (path == displayedPath) displayedFileWasMoved = true
+            if (pendingPopupFile?.let { filePath(it) } == path) pendingPopupWasMoved = true
+            return
+        }
+
+        if (isMovedTo && file.isFile && file.length() > 0L) {
+            if (overlay != null && displayedFileWasMoved) {
+                displayedFile = file
+                displayedFileWasMoved = false
+                completedFilePaths.add(path)
+                photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
+                sourceReadyForSave = true
+                cancelReadinessCheck()
+                updateSaveButtonState(true, saving = saveInProgress)
+                if (pendingSaveFile != null) pendingSaveFile = file
+                if (saveInProgress) handler.post { continuePendingSave(file) }
+                return
+            }
+            if (pendingPopupWasMoved && pendingPopupFile != null) {
+                pendingPopupFile = file
+                pendingPopupWasMoved = false
+                popupQueuedOrShownPaths.add(path)
+                photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
+                return
+            }
+        }
+
         if (path == displayedPath) {
             if (isCompleteEvent && file.isFile && file.length() > 0L) {
                 sourceReadyForSave = true
                 cancelReadinessCheck()
-                updateSaveButtonState(true)
+                updateSaveButtonState(true, saving = saveInProgress)
                 if (pendingSaveFile?.let { filePath(it) } == path) {
                     handler.post { continuePendingSave(file) }
                 }
@@ -173,32 +208,30 @@ class CameraOverlayService : Service() {
             return
         }
 
-        // CLOSE_WRITE serve solo a confermare che la foto è completa:
-        // non deve mai generare un secondo popup.
+        // CLOSE_WRITE conferma il completamento, ma non genera un secondo popup.
         if (handledFilePaths.contains(path) || popupQueuedOrShownPaths.contains(path) || overlay != null) return
         val isNewFileEvent = (event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0
         if (!isNewFileEvent || !file.exists()) return
-
-        // Un solo popup per ciascun file; il ritardo resta fissato a 500 ms.
-        val currentPending = pendingPopupFile
-        if (currentPending != null) return
+        if (pendingPopupFile != null) return
 
         popupQueuedOrShownPaths.add(path)
         pendingPopupFile = file
         photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
         val show = Runnable {
-            if (pendingPopupFile?.let { filePath(it) } != path) return@Runnable
+            // Durante i 500 ms il file potrebbe essere stato rinominato.
+            val currentFile = pendingPopupFile ?: return@Runnable
+            val currentPath = filePath(currentFile)
             pendingPopupFile = null
+            pendingPopupWasMoved = false
             pendingPopupRunnable = null
-            if (overlay != null || handledFilePaths.contains(path) || !file.exists()) return@Runnable
-            sourceReadyForSave = completedFilePaths.contains(path) && file.length() > 0L
-            photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
-            showNameOverlay(file)
+            if (overlay != null || handledFilePaths.contains(currentPath) || !currentFile.exists()) return@Runnable
+            sourceReadyForSave = completedFilePaths.contains(currentPath) && currentFile.length() > 0L
+            photoDateTakenMillis = currentFile.lastModified().takeIf { it > 0L }
+            showNameOverlay(currentFile)
         }
         pendingPopupRunnable = show
         handler.postDelayed(show, 500L)
     }
-
     private fun continuePendingSave(file: File) {
         if (overlay == null || !saveInProgress || pendingSaveFile?.let { filePath(it) } != filePath(file)) return
         if (!file.isFile || file.length() <= 0L) return
@@ -416,10 +449,12 @@ class CameraOverlayService : Service() {
         saveInProgress = false
         sourceReadyForSave = sourceFile?.let { completedFilePaths.contains(filePath(it)) } ?: true
         pendingSaveFile = null
+        displayedFileWasMoved = false
         if (sourceFile != null && pendingPopupFile?.let { filePath(it) } == filePath(sourceFile)) {
             pendingPopupRunnable?.let { handler.removeCallbacks(it) }
             pendingPopupRunnable = null
             pendingPopupFile = null
+            pendingPopupWasMoved = false
         }
         pendingSaveStartedAt = 0L
         displayedFile = sourceFile
@@ -824,6 +859,7 @@ class CameraOverlayService : Service() {
             popupQueuedOrShownPaths.add(path)
         }
         displayedFile = null
+        displayedFileWasMoved = false
         // Conserva il fix acquisito prima di aprire la fotocamera per gli scatti
         // successivi della stessa sessione; writePhotoMetadata lo usa solo se recente.
         photoDateTakenMillis = null
@@ -835,6 +871,7 @@ class CameraOverlayService : Service() {
         pendingPopupRunnable?.let { handler.removeCallbacks(it) }
         pendingPopupRunnable = null
         pendingPopupFile = null
+        pendingPopupWasMoved = false
         dismissOverlay(markAsHandled = false)
         stopLocationUpdates()
         stopForeground(STOP_FOREGROUND_REMOVE)
