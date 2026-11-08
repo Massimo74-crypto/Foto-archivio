@@ -184,7 +184,7 @@ class CameraOverlayService : Service() {
         }
 
         if (isMovedTo && file.isFile && file.length() > 0L) {
-            if (handledPathsAwaitingRename.remove(path)) {
+            if (overlay == null && handledPathsAwaitingRename.remove(path)) {
                 handledFilePaths.add(filePath(file))
                 popupQueuedOrShownPaths.add(filePath(file))
                 completedFilePaths.add(filePath(file))
