@@ -321,14 +321,16 @@ class MainActivity : ComponentActivity() {
             else watermarkWidth
             val watermark = android.graphics.drawable.BitmapDrawable(resources, watermarkBitmap).apply {
                 alpha = 42
-                gravity = Gravity.CENTER
+                // FILL rispetta i 250dp assegnati al layer: CENTER userebbe
+                // le dimensioni intrinseche e ritaglierebbe i bordi del PNG.
+                gravity = Gravity.FILL
             }
             // Cinepresa vintage separata in WebP trasparente: non ricostruisce
             // né sostituisce il PNG fotografico originale.
             val movieCameraBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_vintage_movie_camera)
             val movieCamera = android.graphics.drawable.BitmapDrawable(resources, movieCameraBitmap).apply {
-                alpha = 165
-                gravity = Gravity.CENTER
+                alpha = 130
+                gravity = Gravity.FILL
             }
             background = LayerDrawable(arrayOf(base, watermark, movieCamera)).apply {
                 setLayerGravity(1, Gravity.CENTER)
