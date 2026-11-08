@@ -116,11 +116,34 @@ class CameraOverlayService : Service() {
     private var saveStatusLabel: TextView? = null
     private val diagnosticLock = Any()
     private var diagnosticFile: File? = null
+    private var diagnosticUri: Uri? = null
 
-    // Diagnostica temporanea: scrive in Download/FA_diagnostica_video.txt.
+    // Diagnostica temporanea: crea il file in Download tramite MediaStore,
+    // così Android 10+ lo rende visibile anche nel gestore File del telefono.
     private fun diagnostic(message: String) {
         try {
             synchronized(diagnosticLock) {
+                val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
+                val line = "$stamp | $message\n"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    var uri = diagnosticUri
+                    if (uri == null) {
+                        val values = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "FA_diagnostica_video.txt")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                            put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        }
+                        uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        diagnosticUri = uri
+                    }
+                    if (uri != null) {
+                        contentResolver.openOutputStream(uri, "wa")?.use {
+                            it.write(line.toByteArray(Charsets.UTF_8))
+                        } ?: throw java.io.IOException("Impossibile aprire il file diagnostico in Download")
+                        return
+                    }
+                }
                 val target = diagnosticFile ?: File(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
                     "FA_diagnostica_video.txt"
@@ -128,10 +151,11 @@ class CameraOverlayService : Service() {
                     it.parentFile?.mkdirs()
                     diagnosticFile = it
                 }
-                val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
-                target.appendText("$stamp | $message\n", Charsets.UTF_8)
+                target.appendText(line, Charsets.UTF_8)
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            android.util.Log.e("FA-DIAGNOSTICA", "Scrittura diagnostica non riuscita", e)
+        }
     }
 
     override fun onCreate() {
