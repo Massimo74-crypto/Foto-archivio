@@ -77,7 +77,7 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: FA-Foto-Archivio-0.6.0-signed
+          name: FA-Foto-Archivio-0.6.1-signed
           path: FA-Android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
