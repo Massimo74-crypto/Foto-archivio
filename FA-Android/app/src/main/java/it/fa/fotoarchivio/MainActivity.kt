@@ -55,6 +55,9 @@ class MainActivity : ComponentActivity() {
     private var importQueue: MutableList<Uri> = mutableListOf()
     private val selectedPhotos = linkedSetOf<String>()
     private val selectedFolders = linkedSetOf<String>()
+    private var cachedPhotoItems: List<PhotoItem>? = null
+    private var cachedPhotoItemsAt = 0L
+    private val cachedFolderLists = mutableMapOf<String, Pair<Long, List<String>>>()
     private var explorerCategory = "PERSONALE"
     private var explorerFolder = "Generale"
     private var sortMode = "Data"
@@ -297,10 +300,19 @@ class MainActivity : ComponentActivity() {
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF10191F.toInt(), 0xFF182128.toInt(), 0xFF0C1217.toInt())
             )
-            val watermark = android.graphics.drawable.BitmapDrawable(resources,
-                android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_home_image)).apply { alpha = 42; gravity = Gravity.CENTER }
+            val watermarkBitmap = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.fa_home_image)
+            val watermarkWidth = dp(290)
+            val watermarkHeight = if (watermarkBitmap.width > 0)
+                (watermarkWidth * watermarkBitmap.height.toFloat() / watermarkBitmap.width).toInt()
+            else watermarkWidth
+            val watermark = android.graphics.drawable.BitmapDrawable(resources, watermarkBitmap).apply {
+                alpha = 42
+                gravity = Gravity.CENTER
+            }
             background = LayerDrawable(arrayOf(base, watermark)).apply {
-                setLayerGravity(1, Gravity.CENTER); setLayerWidth(1, dp(340)); setLayerHeight(1, dp(340))
+                setLayerGravity(1, Gravity.CENTER)
+                setLayerWidth(1, watermarkWidth)
+                setLayerHeight(1, watermarkHeight)
             }
         }
         root.addView(TextView(this).apply {
@@ -601,8 +613,12 @@ class MainActivity : ComponentActivity() {
 
     // I percorsi sono relativi alla categoria, ad esempio AMMEGA/CARTEGGIATRICE/RECINZIONE.
     private fun folders(category: String): MutableList<String> {
-        // Unisce le cartelle registrate nelle preferenze con quelle realmente presenti
-        // sul telefono: così una cartella fisica non scompare se manca la voce interna.
+        val now = System.currentTimeMillis()
+        cachedFolderLists[category]?.let { cached ->
+            if (now - cached.first < 5000L) return cached.second.toMutableList()
+        }
+        // Una sola scansione per categoria ogni 5 secondi: i normali tocchi
+        // di navigazione e selezione riutilizzano l'elenco già ricavato.
         val saved = prefs.getStringSet(folderKey(category), emptySet())?.toMutableSet()
             ?: mutableSetOf()
         val expanded = mutableSetOf<String>()
@@ -638,11 +654,20 @@ class MainActivity : ComponentActivity() {
             !directory.exists() || (directory.isDirectory && directory.listFiles().isNullOrEmpty())
         }
         if (emptyDefaultGeneral) expanded.remove("Generale")
-        return expanded.sorted().toMutableList()
+        val result = expanded.sorted()
+        cachedFolderLists[category] = now to result
+        return result.toMutableList()
+    }
+
+    private fun invalidateArchiveCaches() {
+        cachedPhotoItems = null
+        cachedPhotoItemsAt = 0L
+        cachedFolderLists.clear()
     }
 
     private fun saveFolderList(category: String, list: List<String>) {
         prefs.edit().putStringSet(folderKey(category), list.toSet()).apply()
+        cachedFolderLists.remove(category)
     }
 
     private fun folderChildren(category: String, parent: String): List<String> {
@@ -898,6 +923,10 @@ class MainActivity : ComponentActivity() {
     private data class PhotoItem(val file: File, val uri: Uri, val name: String, val path: String, val isVideo: Boolean = false)
 
     private fun listPhotos(): List<PhotoItem> {
+        val now = System.currentTimeMillis()
+        cachedPhotoItems?.let { cached ->
+            if (now - cachedPhotoItemsAt < 1500L) return cached
+        }
         val result = mutableListOf<PhotoItem>()
         listOf(false, true).forEach { isVideo ->
             val root = archiveRoot(isVideo)
@@ -909,13 +938,15 @@ class MainActivity : ComponentActivity() {
                     val relative = file.relativeTo(Environment.getExternalStorageDirectory()).path.replace(File.separatorChar, '/')
                     if (relative.startsWith("$rootName/FotoArchivio/PERSONALE/") ||
                         relative.startsWith("$rootName/FotoArchivio/LAVORO/")) {
-                        try {
-                            result.add(PhotoItem(file, archiveFileUri(file), file.name, "/$relative", isVideo))
-                        } catch (_: Exception) { }
+                        try { result.add(PhotoItem(file, archiveFileUri(file), file.name, "/$relative", isVideo)) }
+                        catch (_: Exception) { }
                     }
                 }
         }
-        return result.sortedByDescending { it.file.lastModified() }
+        val sorted = result.sortedByDescending { it.file.lastModified() }
+        cachedPhotoItems = sorted
+        cachedPhotoItemsAt = now
+        return sorted
     }
 
     private fun isInCategory(path: String, category: String): Boolean =
