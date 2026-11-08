@@ -11,8 +11,28 @@ android {
         applicationId 'it.fa.fotoarchivio'
         minSdk 29
         targetSdk 35
-        versionCode 13
-        versionName '0.5.3'
+        versionCode 14
+        versionName '0.6.0'
+    }
+
+    signingConfigs {
+        release {
+            def signingStore = System.getenv("FA_KEYSTORE_PATH")
+            def signingPassword = System.getenv("FA_KEYSTORE_PASSWORD")
+            if (signingStore && signingPassword) {
+                storeFile file(signingStore)
+                storeType "PKCS12"
+                storePassword signingPassword
+                keyAlias "fotoarchivio-release"
+                keyPassword signingPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+        }
     }
 
     compileOptions {
