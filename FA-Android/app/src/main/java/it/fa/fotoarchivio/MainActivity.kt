@@ -1059,20 +1059,30 @@ class MainActivity : ComponentActivity() {
                 LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(4) })
         }
 
-        val children = folderChildren(explorerCategory, current)
+        val folderPaths = folders(explorerCategory)
+        val prefix = if (current.isBlank()) "" else current + "/"
+        val children = folderPaths.mapNotNull { path ->
+            if (!path.startsWith(prefix) || path == current) null
+            else path.removePrefix(prefix).substringBefore('/').takeIf { it.isNotBlank() }
+        }.distinct().sorted()
         val allItems = listPhotos().filter { isInCategory(it.path, explorerCategory) }
         val exactRelative = current.trim('/')
+        // Un solo passaggio calcola i conteggi per tutte le cartelle antenate.
+        val descendantCounts = mutableMapOf<String, Int>()
+        allItems.forEach { item ->
+            var parentPath = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").substringBeforeLast('/', "")
+            while (parentPath.isNotBlank()) {
+                descendantCounts[parentPath] = (descendantCounts[parentPath] ?: 0) + 1
+                parentPath = parentPath.substringBeforeLast('/', "")
+            }
+        }
         val photos = allItems.filter {
             val relative = it.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
-            val parentFolder = relative.substringBeforeLast('/', "")
-            parentFolder == exactRelative
+            relative.substringBeforeLast('/', "") == exactRelative
         }.sortedBy { it.name.lowercase(Locale.ROOT) }
+        val totalFiles = if (exactRelative.isBlank()) allItems.size else (descendantCounts[exactRelative] ?: 0)
         val folderPrefix = if (exactRelative.isBlank()) "" else exactRelative + "/"
-        val totalFiles = allItems.count { item ->
-            val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
-            if (exactRelative.isBlank()) relative.isNotBlank() else relative == exactRelative || relative.startsWith(folderPrefix)
-        }
-        val totalSubfolders = folders(explorerCategory).count { path ->
+        val totalSubfolders = folderPaths.count { path ->
             path != exactRelative && (exactRelative.isBlank() || path.startsWith(folderPrefix))
         }
         root.addView(TextView(this).apply {
@@ -1087,10 +1097,7 @@ class MainActivity : ComponentActivity() {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         children.forEach { child ->
             val fullPath = if (current.isBlank()) child else current + "/" + child
-            val count = allItems.count {
-                val relative = it.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trimEnd('/')
-                relative == fullPath || relative.startsWith(fullPath + "/")
-            }
+            val count = descendantCounts[fullPath] ?: 0
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
