@@ -676,20 +676,21 @@ class CameraOverlayService : Service() {
                     throw java.io.IOException("Foto originale non ancora disponibile")
                 }
                 val sourceLengthBefore = sourceFile.length()
-                temporaryFile = File(destinationDir, ".$baseName.fa_tmp_${System.nanoTime()}.$extension")
+                val tempFile = File(destinationDir, ".$baseName.fa_tmp_${System.nanoTime()}.$extension")
+                temporaryFile = tempFile
                 sourceFile.inputStream().use { input ->
-                    FileOutputStream(temporaryFile).use { output ->
+                    FileOutputStream(tempFile).use { output ->
                         input.copyTo(output)
                         output.fd.sync()
                     }
                 }
                 val sourceLengthAfter = sourceFile.length()
-                if (sourceLengthBefore != sourceLengthAfter || temporaryFile.length() != sourceLengthAfter) {
+                if (sourceLengthBefore != sourceLengthAfter || tempFile.length() != sourceLengthAfter) {
                     throw java.io.IOException("La fotocamera sta ancora completando la foto: premi SALVA di nuovo")
                 }
 
-                writePhotoMetadata(temporaryFile)
-                if (destination.exists() || !temporaryFile.renameTo(destination)) {
+                writePhotoMetadata(tempFile)
+                if (destination.exists() || !tempFile.renameTo(destination)) {
                     throw java.io.IOException("Non riesco a completare il trasferimento nell'archivio")
                 }
                 if (!destination.isFile || destination.length() != sourceLengthAfter) {
