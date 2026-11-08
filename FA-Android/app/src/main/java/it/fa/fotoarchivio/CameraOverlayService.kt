@@ -701,13 +701,21 @@ class CameraOverlayService : Service() {
                     throw java.io.IOException("La fotocamera sta ancora completando la foto: premi SALVA di nuovo")
                 }
 
+                // La scrittura EXIF può cambiare la dimensione del file:
+                // la verifica finale deve confrontare il file rinominato con
+                // la dimensione effettiva del temporaneo DOPO i metadati.
                 writePhotoMetadata(tempFile)
+                val expectedFinalLength = tempFile.length()
+                if (expectedFinalLength <= 0L) {
+                    throw java.io.IOException("La copia temporanea è vuota dopo i metadati")
+                }
                 if (destination.exists() || !tempFile.renameTo(destination)) {
                     throw java.io.IOException("Non riesco a completare il trasferimento nell'archivio")
                 }
-                if (!destination.isFile || destination.length() != sourceLengthAfter) {
+                if (!destination.isFile || destination.length() != expectedFinalLength) {
+                    val actualLength = if (destination.exists()) destination.length() else -1L
                     destination.delete()
-                    throw java.io.IOException("Verifica finale della copia non riuscita")
+                    throw java.io.IOException("Verifica finale non riuscita (attesi $expectedFinalLength byte, trovati $actualLength)")
                 }
 
                 handler.post {
