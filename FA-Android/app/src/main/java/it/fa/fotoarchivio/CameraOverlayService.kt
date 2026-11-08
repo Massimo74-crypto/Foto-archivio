@@ -450,7 +450,8 @@ class CameraOverlayService : Service() {
             contentDescription = "Chiudi senza salvare"
             isAllCaps = false
             minWidth = dp(44)
-            setOnClickListener {\n                if (saveInProgress) Toast.makeText(this@CameraOverlayService, "Attendi la fine del salvataggio", Toast.LENGTH_SHORT).show()\n                else dismissOverlay(markAsHandled = true)\n            }
+            setOnClickListener {
+                if (saveInProgress) Toast.makeText(this@CameraOverlayService, "Attendi la fine del salvataggio", Toast.LENGTH_SHORT).show()\n                else dismissOverlay(markAsHandled = true)\n            }
         }
         header.addView(close, LinearLayout.LayoutParams(dp(48), dp(44)))
         panel.addView(header)
