@@ -159,7 +159,7 @@ class MainActivity : ComponentActivity() {
     private fun resetArchiveForNextVersion() {
         val storage = Environment.getExternalStorageDirectory()
         val photoRoot = File(storage, "Pictures/FotoArchivio")
-        val marker = File(photoRoot, ".fa_archivio_azzerato_v1")
+        val marker = File(photoRoot, ".fa_archivio_azzerato_v2")
         if (marker.exists()) return
         val faOwnedRoots = listOf(
             photoRoot,
@@ -184,6 +184,7 @@ class MainActivity : ComponentActivity() {
             .remove("fa_last_move_destination")
             .putString("active_category", "PERSONALE")
             .apply()
+        activeCategory = "PERSONALE"
         try { marker.createNewFile() } catch (_: Exception) { }
     }
 
@@ -580,7 +581,7 @@ class MainActivity : ComponentActivity() {
     private fun startNativeCameraSession(location: Location? = null) {
         try {
             prepareArchiveFolders()
-            val folder = prefs.getString(lastFolderKey(activeCategory), "Generale") ?: "Generale"
+            val folder = prefs.getString(lastFolderKey(activeCategory), "") ?: ""
             val serviceIntent = Intent(this, CameraOverlayService::class.java).apply {
                 putExtra(CameraOverlayService.EXTRA_CATEGORY, activeCategory)
                 putExtra(CameraOverlayService.EXTRA_FOLDER, folder)
