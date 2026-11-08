@@ -706,7 +706,6 @@ class CameraOverlayService : Service() {
             .map { safeName(it) }.filter { it.isNotBlank() }
         val extension = sourceFile.extension.lowercase(Locale.ROOT)
             .replace(Regex("[^a-z0-9]"), "").ifBlank { "jpg" }
-        val sourcePath = filePath(sourceFile)
 
         if (archiveCopyInProgress) return
         val operationId = ++saveOperationId
@@ -741,8 +740,9 @@ class CameraOverlayService : Service() {
                 val destination = File(destinationDir, "$baseName.$extension")
                 if (destination.exists()) throw java.io.IOException("Nome già presente in questa cartella")
 
-                val actualSource = if (sourceFile.isFile) sourceFile
-                    else displayedFile?.takeIf { it.isFile } ?: sourceFile
+                val actualSource = sourceFile.takeIf { it.isFile && it.length() > 0L }
+                    ?: displayedFile?.takeIf { it.isFile && it.length() > 0L }
+                    ?: sourceFile
                 if (!actualSource.isFile || actualSource.length() <= 0L) {
                     throw java.io.IOException("Foto originale non disponibile: controlla che sia ancora in DCIM/Camera")
                 }
@@ -755,7 +755,9 @@ class CameraOverlayService : Service() {
                         output.fd.sync()
                     }
                 }
-                val sourceLengthAfter = actualSource.length()
+                val currentSourceAfter = actualSource.takeIf { it.isFile }
+                    ?: displayedFile?.takeIf { it.isFile } ?: actualSource
+                val sourceLengthAfter = currentSourceAfter.length()
                 if (sourceLengthBefore != sourceLengthAfter || tempFile.length() != sourceLengthAfter) {
                     throw java.io.IOException("La fotocamera sta ancora completando la foto: premi SALVA di nuovo")
                 }
