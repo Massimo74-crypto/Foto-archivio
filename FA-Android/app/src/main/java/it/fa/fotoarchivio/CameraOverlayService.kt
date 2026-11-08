@@ -184,12 +184,6 @@ class CameraOverlayService : Service() {
         }
 
         if (isMovedTo && file.isFile && file.length() > 0L) {
-            if (overlay == null && handledPathsAwaitingRename.remove(path)) {
-                handledFilePaths.add(filePath(file))
-                popupQueuedOrShownPaths.add(filePath(file))
-                completedFilePaths.add(filePath(file))
-                return
-            }
             if (overlay != null && displayedFileWasMoved) {
                 displayedFile = file
                 displayedFileWasMoved = false
@@ -207,6 +201,12 @@ class CameraOverlayService : Service() {
                 pendingPopupWasMoved = false
                 popupQueuedOrShownPaths.add(path)
                 photoDateTakenMillis = file.lastModified().takeIf { it > 0L }
+                return
+            }
+            if (overlay == null && handledPathsAwaitingRename.remove(path)) {
+                handledFilePaths.add(filePath(file))
+                popupQueuedOrShownPaths.add(filePath(file))
+                completedFilePaths.add(filePath(file))
                 return
             }
         }
