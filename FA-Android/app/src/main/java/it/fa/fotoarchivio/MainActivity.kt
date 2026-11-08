@@ -81,12 +81,18 @@ class MainActivity : ComponentActivity() {
 
     private val videoLauncher = registerForActivityResult(ActivityResultContracts.CaptureVideo()) { ok ->
         val uri = pendingVideo
-        if (ok && uri != null) showNamingDialog(uri, true)
-        else {
-            pendingVideoFile?.delete()
+        val recordedFile = pendingVideoFile
+        // Alcune fotocamere Motorola restituiscono RESULT_CANCELED anche
+        // dopo aver scritto correttamente il video nell'URI EXTRA_OUTPUT.
+        // In quel caso il file realmente registrato prevale sul solo flag "ok".
+        val videoExists = recordedFile?.isFile == true && recordedFile.length() > 0L
+        if (uri != null && (ok || videoExists) && videoExists) {
+            showNamingDialog(uri, true)
+        } else {
+            recordedFile?.delete()
             pendingVideoFile = null
             pendingVideo = null
-            toast("Registrazione annullata")
+            toast("Registrazione annullata o file video non disponibile")
             showHome()
         }
     }
@@ -447,8 +453,7 @@ class MainActivity : ComponentActivity() {
         captureButtons.addView(actionButton("🎥  REGISTRA VIDEO") {
             launchVideoCamera()
         }, LinearLayout.LayoutParams(0, dp(58), 1f).apply { leftMargin = dp(7) })
-        root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(58)).apply {
-            bottomMargin = dp(12)
+        root.addView(captureButtons, LinearLayout.LayoutParams(-1, dp(58)).apply {            bottomMargin = dp(12)
         })
 
         root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
@@ -897,8 +902,7 @@ class MainActivity : ComponentActivity() {
                 if (baseName == "Generale" && name.text.toString().isBlank()) {
                     name.error = "Inserisci un nome"
                     return@setOnClickListener
-                }
-                val category = categorySpinner.selectedItem.toString()
+                }                val category = categorySpinner.selectedItem.toString()
                 // Il valore dello spinner può essere un percorso completo:
                 // sanificare ogni segmento separatamente preserva le sottocartelle.
                 val selectedFolder = folderSpinner.selectedItem?.toString() ?: "— Cartella principale —"
@@ -1347,8 +1351,7 @@ class MainActivity : ComponentActivity() {
             folders(category).forEach { targets.add(category to it) }
         }
         val labels = targets.map { it.first + " / " + if (it.second.isBlank()) "Cartella principale" else it.second }.toTypedArray()
-        val last = prefs.getString("fa_last_move_destination", "") ?: ""
-        val initial = targets.indexOfFirst { it.first + "/" + it.second == last }.coerceAtLeast(0)
+        val last = prefs.getString("fa_last_move_destination", "") ?: ""        val initial = targets.indexOfFirst { it.first + "/" + it.second == last }.coerceAtLeast(0)
         var chosen = initial
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Sposta selezione")
