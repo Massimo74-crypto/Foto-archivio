@@ -174,13 +174,24 @@ class MainActivity : ComponentActivity() {
         }
         photoRoot.mkdirs()
         File(storage, "Movies/FotoArchivio").mkdirs()
+        // Il reset riguarda anche le sottocartelle ricordate dall'app:
+        // PERSONALE e LAVORO ripartono entrambe dalla cartella principale.
+        getSharedPreferences("fa_settings", Context.MODE_PRIVATE).edit()
+            .remove("folders_PERSONALE")
+            .remove("folders_LAVORO")
+            .remove("last_folder_PERSONALE")
+            .remove("last_folder_LAVORO")
+            .remove("fa_last_move_destination")
+            .putString("active_category", "PERSONALE")
+            .apply()
         try { marker.createNewFile() } catch (_: Exception) { }
     }
 
     private fun prepareArchiveFolders() {
         resetArchiveForNextVersion()
         listOf(false, true).forEach { isVideo ->
-            val root = archiveRoot(isVideo); root.mkdirs(); migrateLegacyArchive(isVideo)
+            val root = archiveRoot(isVideo)
+            root.mkdirs()
             val marker = File(root, ".nomedia")
             if (!marker.exists()) marker.createNewFile()
             listOf("PERSONALE", "LAVORO", ".FA_TEMP").forEach { File(root, it).mkdirs() }
@@ -1092,9 +1103,16 @@ class MainActivity : ComponentActivity() {
             textSize = 12f; setTextColor(0xFFC7B9A7.toInt()); setPadding(0, dp(5), 0, dp(7))
         })
         val selectedCount = selectedFolders.size + selectedPhotos.size
-        if (selectedCount > 0) root.addView(actionButton("ELEMENTI SELEZIONATI (" + selectedCount + ")") {
+        val selectedActionButton = actionButton("ELEMENTI SELEZIONATI (" + selectedCount + ")") {
             showSelectedItemsActions()
-        }, LinearLayout.LayoutParams(-1, dp(44)))
+        }
+        selectedActionButton.visibility = if (selectedCount > 0) View.VISIBLE else View.GONE
+        root.addView(selectedActionButton, LinearLayout.LayoutParams(-1, dp(44)))
+        fun refreshSelectionIndicator() {
+            val countNow = selectedFolders.size + selectedPhotos.size
+            selectedActionButton.text = "ELEMENTI SELEZIONATI (" + countNow + ")"
+            selectedActionButton.visibility = if (countNow > 0) View.VISIBLE else View.GONE
+        }
         val scroll = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         children.forEach { child ->
@@ -1113,7 +1131,7 @@ class MainActivity : ComponentActivity() {
                 isChecked = selectedFolders.contains(fullPath)
                 setOnCheckedChangeListener { _, checked ->
                     if (checked) selectedFolders.add(fullPath) else selectedFolders.remove(fullPath)
-                    showExplorerFolder()
+                    refreshSelectionIndicator()
                 }
             }
             row.addView(TextView(this).apply {
@@ -1162,7 +1180,7 @@ class MainActivity : ComponentActivity() {
                 isChecked = selectedPhotos.contains(photo.uri.toString())
                 setOnCheckedChangeListener { _, checked ->
                     if (checked) selectedPhotos.add(photo.uri.toString()) else selectedPhotos.remove(photo.uri.toString())
-                    showExplorerFolder()
+                    refreshSelectionIndicator()
                 }
             }
             row.addView(photoCheck)
