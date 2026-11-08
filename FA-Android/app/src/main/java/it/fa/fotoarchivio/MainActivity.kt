@@ -902,7 +902,8 @@ class MainActivity : ComponentActivity() {
                 if (baseName == "Generale" && name.text.toString().isBlank()) {
                     name.error = "Inserisci un nome"
                     return@setOnClickListener
-                }                val category = categorySpinner.selectedItem.toString()
+                }
+                val category = categorySpinner.selectedItem.toString()
                 // Il valore dello spinner può essere un percorso completo:
                 // sanificare ogni segmento separatamente preserva le sottocartelle.
                 val selectedFolder = folderSpinner.selectedItem?.toString() ?: "— Cartella principale —"
@@ -1351,7 +1352,8 @@ class MainActivity : ComponentActivity() {
             folders(category).forEach { targets.add(category to it) }
         }
         val labels = targets.map { it.first + " / " + if (it.second.isBlank()) "Cartella principale" else it.second }.toTypedArray()
-        val last = prefs.getString("fa_last_move_destination", "") ?: ""        val initial = targets.indexOfFirst { it.first + "/" + it.second == last }.coerceAtLeast(0)
+        val last = prefs.getString("fa_last_move_destination", "") ?: ""
+        val initial = targets.indexOfFirst { it.first + "/" + it.second == last }.coerceAtLeast(0)
         var chosen = initial
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Sposta selezione")
