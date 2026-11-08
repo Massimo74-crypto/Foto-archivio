@@ -85,6 +85,7 @@ class CameraOverlayService : Service() {
     private var photoDateTakenMillis: Long? = null
     private var folderLabel: TextView? = null
     private var gpsDiagnostic: String = "GPS non ancora verificato"
+    private var saveStatusLabel: TextView? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -463,6 +464,14 @@ class CameraOverlayService : Service() {
             setTextColor(0xFFD8D5D0.toInt())
             setPadding(0, 0, 0, dp(6))
         })
+        val saveStatus = TextView(this).apply {
+            text = "Pronta per il salvataggio"
+            textSize = 12f
+            setTextColor(0xFFD8D5D0.toInt())
+            setPadding(0, 0, 0, dp(6))
+        }
+        saveStatusLabel = saveStatus
+        panel.addView(saveStatus)
         val input = object : EditText(this) {
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
@@ -719,6 +728,8 @@ class CameraOverlayService : Service() {
                         pendingSaveFile = null
                         pendingSaveStartedAt = 0L
                         updateSaveButtonState(sourceReadyForSave)
+                        saveStatusLabel?.text = "ERRORE: ${e.javaClass.simpleName} — ${e.localizedMessage ?: "nessun dettaglio"}"
+                        saveStatusLabel?.setTextColor(0xFFFF8A80.toInt())
                         Toast.makeText(
                             this,
                             "Salvataggio non riuscito: ${e.localizedMessage ?: e.javaClass.simpleName}",
