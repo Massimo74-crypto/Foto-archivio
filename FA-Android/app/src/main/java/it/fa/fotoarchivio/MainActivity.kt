@@ -668,6 +668,8 @@ class MainActivity : ComponentActivity() {
     private fun saveFolderList(category: String, list: List<String>) {
         prefs.edit().putStringSet(folderKey(category), list.toSet()).apply()
         cachedFolderLists.remove(category)
+        cachedPhotoItems = null
+        cachedPhotoItemsAt = 0L
     }
 
     private fun folderChildren(category: String, parent: String): List<String> {
