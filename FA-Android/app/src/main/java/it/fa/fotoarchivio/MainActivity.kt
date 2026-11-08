@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
     private var waitingForStoragePermission = false
     private var importQueue: MutableList<Uri> = mutableListOf()
     private val selectedPhotos = linkedSetOf<String>()
+    private val selectedFolders = linkedSetOf<String>()
     private var explorerCategory = "PERSONALE"
     private var explorerFolder = "Generale"
     private var sortMode = "Data"
@@ -150,7 +151,31 @@ class MainActivity : ComponentActivity() {
         return File(Environment.getExternalStorageDirectory(), "$top/FotoArchivio")
     }
 
+    // Pulizia iniziale richiesta per la nuova versione: riguarda solo le cartelle
+    // archivio create da FA. DCIM/Camera e la Galleria Motorola non vengono toccate.
+    private fun resetArchiveForNextVersion() {
+        val storage = Environment.getExternalStorageDirectory()
+        val photoRoot = File(storage, "Pictures/FotoArchivio")
+        val marker = File(photoRoot, ".fa_archivio_azzerato_v1")
+        if (marker.exists()) return
+        val faOwnedRoots = listOf(
+            photoRoot,
+            File(storage, "Movies/FotoArchivio"),
+            File(storage, "Pictures/FA archivio principale"),
+            File(storage, "Pictures/FA"),
+            File(storage, "Movies/FA archivio principale"),
+            File(storage, "Movies/FA")
+        )
+        faOwnedRoots.forEach { directory ->
+            try { if (directory.exists()) directory.deleteRecursively() } catch (_: Exception) { }
+        }
+        photoRoot.mkdirs()
+        File(storage, "Movies/FotoArchivio").mkdirs()
+        try { marker.createNewFile() } catch (_: Exception) { }
+    }
+
     private fun prepareArchiveFolders() {
+        resetArchiveForNextVersion()
         listOf(false, true).forEach { isVideo ->
             val root = archiveRoot(isVideo)
             root.mkdirs()
@@ -894,6 +919,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showFileManager() {
         selectedPhotos.clear()
+        selectedFolders.clear()
         val root = page("Archivio FA")
         root.addView(TextView(this).apply {
             text = "Scegli l'archivio da esplorare"
@@ -934,6 +960,8 @@ class MainActivity : ComponentActivity() {
     private fun showFolderList(category: String) {
         explorerCategory = category
         explorerFolder = ""
+        selectedPhotos.clear()
+        selectedFolders.clear()
         prefs.edit().putString(lastFolderKey(category), "").apply()
         showExplorerFolder()
     }
@@ -1027,6 +1055,16 @@ class MainActivity : ComponentActivity() {
             setTextColor(0xFFC7B9A7.toInt())
             setPadding(0, dp(6), 0, dp(6))
         })
+        if (selectedFolders.isNotEmpty()) {
+            root.addView(actionButton("GESTISCI CARTELLE SELEZIONATE (${selectedFolders.size})") {
+                showBulkFolderActions()
+            }, LinearLayout.LayoutParams(-1, dp(44)))
+        }
+        if (selectedPhotos.isNotEmpty()) {
+            root.addView(actionButton("GESTISCI FOTO/VIDEO SELEZIONATI (${selectedPhotos.size})") {
+                showBulkPhotoActions()
+            }, LinearLayout.LayoutParams(-1, dp(44)))
+        }
         val scroll = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         children.forEach { child ->
@@ -1040,6 +1078,15 @@ class MainActivity : ComponentActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8), dp(10), dp(8), dp(10))
             }
+            val folderCheck = CheckBox(this).apply {
+                buttonTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
+                isChecked = selectedFolders.contains(fullPath)
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedFolders.add(fullPath) else selectedFolders.remove(fullPath)
+                    showExplorerFolder()
+                }
+            }
+            row.addView(folderCheck)
             row.addView(TextView(this).apply {
                 text = "📁"
                 textSize = 27f
@@ -1078,6 +1125,15 @@ class MainActivity : ComponentActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(6), 0, dp(6))
             }
+            val photoCheck = CheckBox(this).apply {
+                buttonTintList = android.content.res.ColorStateList.valueOf(0xFF9DB9D2.toInt())
+                isChecked = selectedPhotos.contains(photo.uri.toString())
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedPhotos.add(photo.uri.toString()) else selectedPhotos.remove(photo.uri.toString())
+                    showExplorerFolder()
+                }
+            }
+            row.addView(photoCheck)
             val thumb = ImageView(this).apply {
                 if (photo.isVideo) {
                     setImageResource(android.R.drawable.ic_media_play)
@@ -1212,6 +1268,46 @@ class MainActivity : ComponentActivity() {
             it == path || it.startsWith(path + "/")
         })
         showExplorerFolder()
+    }
+
+    private fun showBulkFolderActions() {
+        val chosen = selectedFolders.toList()
+        if (chosen.isEmpty()) { toast("Seleziona prima una o più cartelle"); return }
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("${chosen.size} cartelle selezionate")
+            .setItems(arrayOf("Elimina cartelle vuote selezionate", "Deseleziona tutto")) { _, which ->
+                if (which == 1) {
+                    selectedFolders.clear()
+                    showExplorerFolder()
+                    return@setItems
+                }
+                val allFolders = folders(explorerCategory)
+                val media = listPhotos().filter { isInCategory(it.path, explorerCategory) }
+                val nonEmpty = chosen.filter { path ->
+                    val hasChild = allFolders.any { it.startsWith(path + "/") }
+                    val hasMedia = media.any { item ->
+                        val relative = item.path.substringAfter("/FotoArchivio/" + explorerCategory + "/", "").trim('/')
+                        relative == path || relative.startsWith(path + "/")
+                    }
+                    hasChild || hasMedia
+                }
+                if (nonEmpty.isNotEmpty()) {
+                    toast("Alcune cartelle contengono elementi: non sono state eliminate")
+                    return@setItems
+                }
+                chosen.forEach { path ->
+                    listOf(false, true).forEach { isVideo ->
+                        File(archiveRoot(isVideo), "$explorerCategory/$path").delete()
+                    }
+                }
+                saveFolderList(explorerCategory, allFolders.filterNot { path ->
+                    chosen.any { path == it || path.startsWith(it + "/") }
+                })
+                selectedFolders.clear()
+                showExplorerFolder()
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
     }
 
     private fun showBulkPhotoActions() {
