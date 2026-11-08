@@ -459,7 +459,7 @@ class CameraOverlayService : Service() {
         // Motorola può scrivere su un nome provvisorio e poi rinominare la foto.
         // Seguiamo MOVED_FROM/MOVED_TO per aggiornare il riferimento usato dal popup.
         if (isMovedFrom) {
-            if (isVideo(file) && (handledFilePaths.contains(path) || popupQueuedOrShownPaths.contains(path) || path == displayedPath)) {
+            if (isVideo(file) && (handledFilePaths.contains(path) || path == displayedPath)) {
                 handledVideoAwaitingFinalRename = true
             }
             if (path == displayedPath) {
