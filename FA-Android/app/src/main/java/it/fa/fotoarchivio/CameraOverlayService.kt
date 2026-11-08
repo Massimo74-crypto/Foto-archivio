@@ -60,7 +60,7 @@ class CameraOverlayService : Service() {
     private var nameInput: EditText? = null
     private var saveButton: Button? = null
     private var saveInProgress = false
-    private var displayedFile: File? = null
+    @Volatile private var displayedFile: File? = null
     private val handledFilePaths = mutableSetOf<String>()
     private val popupQueuedOrShownPaths = mutableSetOf<String>()
     // Tiene traccia dei nomi provvisori già riconosciuti: alcune fotocamere
@@ -73,6 +73,8 @@ class CameraOverlayService : Service() {
     private var pendingPopupRunnable: Runnable? = null
     private var displayedFileWasMoved = false
     private var sourceReadyForSave = false
+    private var archiveCopyInProgress = false
+    private var saveOperationId = 0L
     private var pendingSaveStartedAt = 0L
     private var pendingSaveFile: File? = null
     private var pendingSaveLastLength = -1L
@@ -82,7 +84,7 @@ class CameraOverlayService : Service() {
     private var readyCheckStableChecks = 0
     private var readyCheckStartedAt = 0L
     private var category = "PERSONALE"
-    private var folder = "Generale"
+    private var folder = ""
     private var sessionStartSeconds = 0L
     private var candidateLocation: Location? = null
     private var locationManager: LocationManager? = null
@@ -110,7 +112,7 @@ class CameraOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         category = intent?.getStringExtra(EXTRA_CATEGORY) ?: "PERSONALE"
-        folder = intent?.getStringExtra(EXTRA_FOLDER) ?: "Generale"
+        folder = intent?.getStringExtra(EXTRA_FOLDER) ?: ""
         sessionStartSeconds = (intent?.getLongExtra(EXTRA_START_TIME, System.currentTimeMillis()) 
             ?: System.currentTimeMillis()) / 1000L
         // Conserva il fix eventualmente acquisito dall'attività prima dell'avvio
@@ -627,8 +629,8 @@ class CameraOverlayService : Service() {
 
     private fun availableFolders(targetCategory: String): List<String> {
         val prefs = getSharedPreferences("fa_settings", Context.MODE_PRIVATE)
-        val saved = prefs.getStringSet("folders_$targetCategory", setOf("Generale"))
-            ?.toMutableSet() ?: mutableSetOf("Generale")
+        val saved = prefs.getStringSet("folders_$targetCategory", emptySet())
+            ?.toMutableSet() ?: mutableSetOf()
         val root = File(Environment.getExternalStorageDirectory(),
             "Pictures/FotoArchivio/$targetCategory")
         if (root.exists()) {
@@ -637,17 +639,18 @@ class CameraOverlayService : Service() {
                 if (relative.isNotBlank() && !relative.startsWith(".FA_TEMP")) saved.add(relative)
             }
         }
-        if (saved.isEmpty()) saved.add("Generale")
         return saved.sorted()
     }
 
     private fun showFolderPicker() {
         val choices = mutableListOf<Pair<String, String>>()
         listOf("PERSONALE", "LAVORO").forEach { cat ->
+            choices.add(cat to "")
             availableFolders(cat).forEach { path -> choices.add(cat to path) }
         }
         val labels = choices.map { (cat, path) ->
-            (if (cat == category) "✓ " else "") + "$cat  /  $path"
+            (if (cat == category) "✓ " else "") + "$cat  /  " +
+                if (path.isBlank()) "Cartella principale" else path
         }.toTypedArray()
         val dialog = android.app.AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Scegli la cartella di destinazione")
@@ -705,8 +708,12 @@ class CameraOverlayService : Service() {
             .replace(Regex("[^a-z0-9]"), "").ifBlank { "jpg" }
         val sourcePath = filePath(sourceFile)
 
+        if (archiveCopyInProgress) return
+        val operationId = ++saveOperationId
+        archiveCopyInProgress = true
         // La copia e la scrittura EXIF avvengono fuori dal thread grafico.
-        // Il popup resta in "SALVATAGGIO…" solo finché la copia verificata non termina.
+        // L'operazione resta associata al popup, non al nome provvisorio:
+        // Motorola può rinominare il file mentre il salvataggio è in corso.
         Thread({
             var temporaryFile: File? = null
             try {
@@ -734,19 +741,21 @@ class CameraOverlayService : Service() {
                 val destination = File(destinationDir, "$baseName.$extension")
                 if (destination.exists()) throw java.io.IOException("Nome già presente in questa cartella")
 
-                if (!sourceFile.isFile || sourceFile.length() <= 0L) {
-                    throw java.io.IOException("Foto originale non ancora disponibile")
+                val actualSource = if (sourceFile.isFile) sourceFile
+                    else displayedFile?.takeIf { it.isFile } ?: sourceFile
+                if (!actualSource.isFile || actualSource.length() <= 0L) {
+                    throw java.io.IOException("Foto originale non disponibile: controlla che sia ancora in DCIM/Camera")
                 }
-                val sourceLengthBefore = sourceFile.length()
+                val sourceLengthBefore = actualSource.length()
                 val tempFile = File(destinationDir, ".$baseName.fa_tmp_${System.nanoTime()}.$extension")
                 temporaryFile = tempFile
-                sourceFile.inputStream().use { input ->
+                actualSource.inputStream().use { input ->
                     FileOutputStream(tempFile).use { output ->
                         input.copyTo(output)
                         output.fd.sync()
                     }
                 }
-                val sourceLengthAfter = sourceFile.length()
+                val sourceLengthAfter = actualSource.length()
                 if (sourceLengthBefore != sourceLengthAfter || tempFile.length() != sourceLengthAfter) {
                     throw java.io.IOException("La fotocamera sta ancora completando la foto: premi SALVA di nuovo")
                 }
@@ -769,7 +778,8 @@ class CameraOverlayService : Service() {
                 }
 
                 handler.post {
-                    if (displayedFile?.let { filePath(it) } == sourcePath) {
+                    if (overlay != null && saveOperationId == operationId) {
+                        archiveCopyInProgress = false
                         Toast.makeText(
                             this,
                             "Salvata come $baseName.$extension in FA/$categorySnapshot/${folderSnapshot.joinToString("/")}",
@@ -781,7 +791,8 @@ class CameraOverlayService : Service() {
             } catch (e: Exception) {
                 try { temporaryFile?.delete() } catch (_: Exception) { }
                 handler.post {
-                    if (displayedFile?.let { filePath(it) } == sourcePath) {
+                    if (overlay != null && saveOperationId == operationId) {
+                        archiveCopyInProgress = false
                         saveInProgress = false
                         pendingSaveFile = null
                         pendingSaveStartedAt = 0L
@@ -862,6 +873,8 @@ class CameraOverlayService : Service() {
         nameInput = null
         saveButton = null
         saveInProgress = false
+        archiveCopyInProgress = false
+        saveOperationId++
         sourceReadyForSave = false
         pendingSaveFile = null
         pendingSaveLastLength = -1L
