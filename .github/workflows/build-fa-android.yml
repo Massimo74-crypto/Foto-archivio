@@ -17,10 +17,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Verify permanent signing secrets
+        env:
+          FA_KEYSTORE_BASE64: ${{ secrets.FA_KEYSTORE_BASE64 }}
+          FA_KEYSTORE_PASSWORD: ${{ secrets.FA_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$FA_KEYSTORE_BASE64" || (echo "Missing FA_KEYSTORE_BASE64 repository secret" && exit 1)
+          test -n "$FA_KEYSTORE_PASSWORD" || (echo "Missing FA_KEYSTORE_PASSWORD repository secret" && exit 1)
+          echo "$FA_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/fa-release.p12"
+          keytool -list -keystore "$RUNNER_TEMP/fa-release.p12" -storetype PKCS12 -storepass "$FA_KEYSTORE_PASSWORD" -alias fotoarchivio-release
+          echo "FA_KEYSTORE_PATH=$RUNNER_TEMP/fa-release.p12" >> "$GITHUB_ENV"
+
       - name: Install original vintage home image
         run: |
           mkdir -p FA-Android/app/src/main/res/drawable-nodpi
           curl -L --fail --silent --show-error "https://raw.githubusercontent.com/Massimo74-crypto/Foto-archivio/main/file_00000000c53882108ed52dd93d0cc7bb.png" -o FA-Android/app/src/main/res/drawable-nodpi/fa_home_image.png
+
       - name: Install separate vintage movie camera overlay
         run: |
           mkdir -p FA-Android/app/src/main/res/drawable-nodpi
@@ -53,14 +65,20 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle --no-daemon -p FA-Android assembleDebug
+      - name: Build signed release APK
+        env:
+          FA_KEYSTORE_PASSWORD: ${{ secrets.FA_KEYSTORE_PASSWORD }}
+        run: gradle --no-daemon -p FA-Android assembleRelease
 
-      - name: Upload APK
+      - name: Verify APK signature
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs FA-Android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: FA-Foto-Archivio-debug
-          path: FA-Android/app/build/outputs/apk/debug/app-debug.apk
+          name: FA-Foto-Archivio-0.6.0-signed
+          path: FA-Android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
 
