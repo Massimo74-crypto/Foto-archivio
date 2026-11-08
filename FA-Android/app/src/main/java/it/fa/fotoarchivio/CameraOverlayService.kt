@@ -129,7 +129,7 @@ class CameraOverlayService : Service() {
                     diagnosticFile = it
                 }
                 val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
-                target.appendText("$stamp | $message\\n", Charsets.UTF_8)
+                target.appendText("$stamp | $message\n", Charsets.UTF_8)
             }
         } catch (_: Exception) { }
     }
