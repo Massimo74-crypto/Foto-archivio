@@ -1,8 +1,9 @@
 FOTO ARCHIVIO — SORGENTI ANDROID
 
-Versione di riferimento conservata
-- APK archiviato in ChatGPT Library: Foto-Archivio-V0.0.apk
-- I metadati interni dell'APK indicano versionName 0.6.1 e versionCode 15.
+Versione stabile di riferimento: V0.0
+- Etichetta/nome di release scelto dall'utente: Foto-Archivio-V0.0.apk.
+- La sigla V0.0 identifica la versione stabile archiviata e non deve essere rinominata in base ai metadati tecnici interni.
+- I metadati Android dell'APK conservato indicano versionName 0.6.1 e versionCode 15: sono dati interni di compilazione, distinti dall'etichetta di release V0.0.
 - applicationId: it.fa.fotoarchivio
 - Sorgenti Android corrispondenti per package e versione: cartella FA-Android/
 - Build firmata tramite GitHub Actions: workflow .github/workflows/build-fa-android.yml
